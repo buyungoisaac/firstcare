@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#174A7E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pharmacy">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Pharmacy system</title>
+<link rel="stylesheet" href="pharmacy.css">
+</head>
+<body>
+<div class="app">
+<header class="top"><div class="brand"><img id="hlogo" class="hlogo" alt="" hidden><div><small id="hname">Macro Medical Centre</small><b>Pharmacy</b></div></div>
+<div class="hdr-r"><div class="umenu" id="umenu" hidden><button type="button" id="userBtn" class="uavatar" aria-haspopup="menu" aria-expanded="false" aria-controls="userPanel" aria-label="Account menu"><span id="uinit" aria-hidden="true"></span></button>
+<div id="userPanel" class="upanel" role="menu" aria-label="Account" hidden>
+<div class="uhead"><span id="who" class="uname"></span><span id="urole" class="urole"></span></div>
+<div class="usec" role="group" aria-label="Appearance"><span class="ulbl">Appearance</span><div class="useg">
+<button type="button" role="menuitemradio" aria-checked="false" data-th="light">Light</button>
+<button type="button" role="menuitemradio" aria-checked="false" data-th="dark">Dark</button>
+<button type="button" role="menuitemradio" aria-checked="false" data-th="auto">Auto</button></div></div>
+<button type="button" id="signout" class="uitem" role="menuitem"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>Sign out</button>
+</div></div></div></header>
+<main id="main" tabindex="-1"></main>
+<div id="login" role="dialog" aria-modal="true" aria-labelledby="ltitle">
+<span class="pb" style="left:6%;animation-duration:7s"></span><span class="pb" style="left:24%;animation-duration:9s;animation-delay:1.5s"></span><span class="pb" style="left:42%;animation-duration:8s;animation-delay:3s"></span><span class="pb" style="left:60%;animation-duration:10s;animation-delay:.8s"></span><span class="pb" style="left:78%;animation-duration:7.5s;animation-delay:2.2s"></span><span class="pb" style="left:92%;animation-duration:9.5s;animation-delay:4s"></span>
+<div class="lbox">
+<img id="llogo" class="llogo" alt="" hidden>
+<svg class="lart" viewBox="0 0 160 60" aria-hidden="true"><text class="lnm" id="ltitle" x="80" y="34" text-anchor="middle">Macro Medical Centre</text><g class="ldp"><path class="llf" d="M80 19H59a11 11 0 0 0 0 22H80Z"/><path class="lrt" d="M80 19H101a11 11 0 0 1 0 22H80Z"/></g></svg>
+<div class="lform">
+<div id="lsetup" hidden>
+<p class="hint" style="text-align:center">Welcome. Create the first account. It becomes the administrator.</p>
+<label for="sn">Your full name</label><input id="sn" autocomplete="off" placeholder="Full name">
+<label for="sp" class="gap">Choose a 4-digit PIN</label><input id="sp" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" placeholder="4-digit PIN">
+<label for="sp2" class="gap">Confirm PIN</label><input id="sp2" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" placeholder="Repeat the PIN">
+<p class="lerr" id="lserr" role="alert"></p>
+<button class="btn btn-primary wide" id="lsgo" type="button">Create admin account</button>
+</div>
+<div id="lsign">
+<label for="lw">Worker</label><select id="lw"></select>
+<input id="lname" style="margin-top:8px" autocomplete="off" placeholder="Full name" aria-label="Full name" hidden>
+<div id="pinpad" class="pinpad" hidden>
+<div class="pwho" id="pwho"></div><div class="pwr" id="pwr"></div>
+<button type="button" class="plink" id="pchange">Not you? Change</button>
+<div class="ptxt" id="ptxt">Enter your PIN</div>
+<div class="pdots" id="pdots" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+<div class="pkeys" id="pkeys" role="group" aria-label="PIN keypad"></div>
+</div>
+<label for="lp" class="gap">PIN</label><input id="lp" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="4-digit PIN">
+<p class="lerr" id="lerr" role="alert"></p>
+<button class="btn btn-primary wide" id="lgo" type="button">Sign in</button>
+</div>
+</div></div></div>
+<nav class="nav" aria-label="Main">
+<button data-v="dash" aria-current="page">Dashboard</button>
+<button data-v="inv">Inventory</button>
+<button data-v="pos">POS</button>
+<button data-v="rcpt">Receipts</button>
+<button data-v="rx">Prescriptions</button>
+<button data-v="team">Team</button>
+<button data-v="facility">Facility</button>
+</nav>
+</div>
+<script src="pharmacy.js"></script>
+</body>
+</html>
