@@ -1,7 +1,7 @@
 {
   "name": "Pharmacy",
   "short_name": "Pharmacy",
-  "start_url": "pharmacy.html",
+  "start_url": "index.html",
   "scope": ".",
   "display": "standalone",
   "background_color": "#F3F7FB",
