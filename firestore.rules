@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function worker() { return get(/databases/$(database)/documents/workers/$(request.auth.uid)).data; }
+    function isWorker() { return signedIn() && exists(/databases/$(database)/documents/workers/$(request.auth.uid)); }
+    function isAdmin() { return isWorker() && worker().role == 'Admin'; }
+    // true for administrators, and for workers who were given that area (dash, inv, pos, rcpt, rx, team, facility)
+    function can(area) { return isWorker() && (worker().role == 'Admin' || (worker().access is list && area in worker().access)); }
+    function setupDone() { return exists(/databases/$(database)/documents/meta/setup); }
+
+    // Workers: each person reads their own record; administrators read and manage everyone.
+    match /workers/{uid} {
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if isAdmin();
+      // first-ever account on a fresh system becomes the owner/administrator
+      allow create: if isAdmin()
+        || (signedIn() && request.auth.uid == uid && !setupDone()
+            && request.resource.data.role == 'Admin' && request.resource.data.owner == true);
+      allow update: if isAdmin() && resource.data.owner != true;
+      allow delete: if isAdmin() && resource.data.owner != true;
+    }
+
+    // Marker that the owner exists. Anyone can check it, only the owner's setup can create it, once.
+    match /meta/setup {
+      allow get: if true;
+      allow create: if signedIn() && !setupDone()
+        && getAfter(/databases/$(database)/documents/workers/$(request.auth.uid)).data.owner == true;
+      allow update, delete: if false;
+    }
+
+    // Facility name/logo/receipt text: readable on the login screen, changed only by administrators.
+    match /meta/facility {
+      allow get: if true;
+      allow write: if isAdmin();
+    }
+
+    // Saving of stock and sales. Every signed-in worker can read them (the till needs the stock list).
+    // meta/store: marker that saving is set up, plus the next batch/receipt numbers.
+    match /meta/store {
+      allow get: if isWorker();
+      allow create, update: if isWorker();
+      allow delete: if false;
+    }
+
+    // Stock batches. Selling or dispensing takes stock off, so POS and Prescriptions may change them too.
+    match /stock/{id} {
+      allow read: if isWorker();
+      allow create, update: if (can('inv') || can('pos') || can('rx'))
+        && request.resource.data.name is string && request.resource.data.qty is number;
+      allow delete: if can('inv');
+    }
+
+    // The medicine list (name, unit, price, reorder level).
+    match /catalog/{id} {
+      allow read: if isWorker();
+      allow create, update: if can('inv') && request.resource.data.name is string;
+      allow delete: if can('inv');
+    }
+
+    // Receipts. The till records them, Receipts takes credit payments, only administrators delete them.
+    match /sales/{id} {
+      allow read: if isWorker();
+      allow create, update: if (can('pos') || can('rcpt')) && request.resource.data.total is number;
+      allow delete: if isAdmin();
+    }
+
+    // Everything else is closed until it is deliberately opened.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

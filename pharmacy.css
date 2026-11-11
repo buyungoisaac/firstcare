@@ -298,5 +298,5 @@ main{max-width:none;margin:0;padding:0}
 .pkeys .pdel:active{background:none;opacity:.5}
 #lsign:has(#lgo:disabled) .pkeys{opacity:.4}
 .pinmode label[for=lp],.pinmode #lp,.pinmode #lgo{display:none}
-.pinmode:not(.showsel) #lw,.pinmode:not(.showsel) label[for=lw]{display:none}
+.pinmode:not(.showsel) #lname,.pinmode:not(.showsel) label[for=lname]{display:none}
 @media (max-height:720px){.pkeys{grid-template-columns:repeat(3,62px);gap:8px 14px}.pkeys button{width:62px;height:62px;font-size:24px}.pdots{margin-bottom:12px}.pwho{font-size:19px}}

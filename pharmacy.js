@@ -64,9 +64,7 @@ rx:[
 nextMed:7,nextRx:5,cart:[],sales:[],pq:"",nextSale:1,nextLine:1,rcpt:null,as:null,user:null,fails:0,slots:5,nextWorker:1,team:[]};
 try{const s=JSON.parse(localStorage.getItem(FKEY));if(s&&typeof s.name==="string"&&s.name.trim())state.facility={name:s.name.trim(),logo:typeof s.logo==="string"&&s.logo.startsWith("data:image/")?s.logo:"",phone:typeof s.phone==="string"?s.phone:"",footer:typeof s.footer==="string"?s.footer:"Thank you. Get well soon.",showCashier:s.showCashier!==false,showChange:s.showChange!==false};}catch(e){}
 
-const TKEY="pharmacy-team";
-try{const t=JSON.parse(localStorage.getItem(TKEY));if(Array.isArray(t)){state.team=t.filter(w=>w&&typeof w.name==="string"&&Array.isArray(w.access));state.nextWorker=state.team.reduce((a,w)=>Math.max(a,+w.id||0),0)+1;}}catch(e){}
-function saveTeam(){try{localStorage.setItem(TKEY,JSON.stringify(state.team));return true;}catch(e){return false;}}
+/* workers live in Firebase (cloud.js); this device keeps only the signed-in worker and the list the admin may see */
 /* ---- Expenses (kept on this device) and credit-sale form ---- */
 const EKEY="pharmacy-expenses";
 state.expenses=[];state.nextExp=1;state.rxCost=0;state.facTab="details";
@@ -679,6 +677,7 @@ function rx(){
 function msg(){return state.msg?`<div class="msg ${state.msg.err?"err":""}" role="status">${esc(state.msg.t)}</div>`:"";}
 
 function render(){
+  if(cloud)cloud.syncStore(); /* save any change to stock or sales */
   applyFacility();
   const lg=document.getElementById("login");
   if(!state.user){document.getElementById("main").innerHTML="";lg.classList.remove("out");return;}
@@ -793,8 +792,9 @@ document.getElementById("main").addEventListener("click",e=>{
     const name=state.draft.name.trim();
     if(!name){state.msg={t:"Enter the facility name.",err:1};return render();}
     state.facility={name,logo:state.draft.logo||"",phone:(state.draft.phone||"").trim(),footer:(state.draft.footer||"").trim(),showCashier:!!state.draft.showCashier,showChange:!!state.draft.showChange};state.draft=null;
-    let saved=true;try{localStorage.setItem(FKEY,JSON.stringify(state.facility));}catch(err){saved=false;}
-    state.msg={t:saved?"Facility details saved.":"Facility details updated for this session, but could not be kept after you close the page."};render();
+    try{localStorage.setItem(FKEY,JSON.stringify(state.facility));}catch(err){}
+    state.msg={t:"Saving facility details\u2026"};render();
+    (cloud?cloud.saveFacility(state.facility):Promise.reject()).then(()=>{state.msg={t:"Facility details saved for every device."};render();}).catch(()=>{state.msg={t:"Saved on this device only. The server could not be reached.",err:1};render();});
   }else if(t.id==="flogoclear"){state.draft.logo="";state.msg=null;render();
   }else if(t.id==="addMed"){
     let name=fn.value.trim();const exp=fe.value,qty=+fq.value,keep=["fn","fq","fc","fp","fe"].map(id=>[id,document.getElementById(id).value]);
@@ -846,23 +846,30 @@ document.getElementById("main").addEventListener("click",e=>{
   }else if(t.dataset.rdelask){if(!isAdmin())return;state.rdelAsk=true;state.rdelErr="";render();const pe=document.getElementById("rdelpin");if(pe)pe.focus();
   }else if(t.dataset.rdelcancel){state.rdelAsk=false;state.rdelErr="";render();
   }else if(t.dataset.rdelgo){
-    const me=state.team.find(w=>w.id===state.user),pin=(document.getElementById("rdelpin")||{}).value||"",id=+t.dataset.rdelgo;
-    if(!isAdmin()||pin!==me.pin){state.rdelErr="Incorrect PIN. Nothing was deleted.";render();const pe=document.getElementById("rdelpin");if(pe)pe.focus();return;}
-    state.sales=state.sales.filter(x=>x.id!==id);state.rcpt=null;state.rdelAsk=false;state.rdelErr="";
-    state.msg={t:"Receipt #"+id+" deleted."};render();window.scrollTo(0,0);
+    const pin=(document.getElementById("rdelpin")||{}).value||"",id=+t.dataset.rdelgo;
+    if(!isAdmin())return;
+    cloud.verifyPin(pin).then(ok=>{
+      if(!ok){state.rdelErr="Incorrect PIN. Nothing was deleted.";render();const pe=document.getElementById("rdelpin");if(pe)pe.focus();return;}
+      state.sales=state.sales.filter(x=>x.id!==id);state.rcpt=null;state.rdelAsk=false;state.rdelErr="";
+      state.msg={t:"Receipt #"+id+" deleted."};render();window.scrollTo(0,0);
+    });
   }else if(t.id==="addWorker"){
     const name=wn.value.trim(),access=[...document.querySelectorAll("[data-acc]:checked")].map(c=>c.dataset.acc),slot=+wslot.value,pin=wpin.value.trim();
     if(pin.length!==4||isNaN(+pin)){state.msg={t:"Enter a 4-digit PIN for the worker.",err:1};return render();}
     if(!name||!access.length){state.msg={t:"Enter the worker\u2019s name and choose at least one area they can access.",err:1};return render();}
-    state.team.push({id:state.nextWorker++,name,role:wrole.value,slot,pin,access});saveTeam();
-    state.msg={t:name+" is assigned to slot "+slot+" with access to "+access.length+" areas."};render();
+    if(!isAdmin())return;
+    if(state.team.some(w=>w.name.toLowerCase()===name.toLowerCase())){state.msg={t:"A worker with that name already exists.",err:1};return render();}
+    t.disabled=true;state.msg={t:"Adding "+name+"\u2026"};render();
+    cloud.createWorker({name,pin,role:wrole.value,slot,access}).then(()=>{state.msg={t:name+" is assigned to slot "+slot+" with access to "+access.length+" areas. They can now sign in on any device with their name and PIN."};render();})
+      .catch(err=>{state.msg={t:err.message||"Could not add the worker.",err:1};render();});
   }else if(t.dataset.prev){
-    state.as=+t.dataset.prev;state.msg=null;state.rcpt=null;state.draft=null;
+    state.as=t.dataset.prev;state.msg=null;state.rcpt=null;state.draft=null;
     state.view=isMobile()?"home":(Object.keys(VIEWS).find(allowed)||state.view);render();
   }else if(t.id==="exitprev"){state.as=null;state.draft=null;state.view=allowed("team")?"team":Object.keys(VIEWS).find(allowed)||"dash";render();
   }else if(t.dataset.rmw){
-    const id=+t.dataset.rmw;state.team=state.team.filter(w=>w.id!==id);saveTeam();
-    state.msg={t:"Worker removed. Their slot is free."};render();
+    if(!isAdmin())return;
+    cloud.removeWorker(t.dataset.rmw).then(()=>{state.msg={t:"Worker removed. They can no longer sign in, and their slot is free."};render();})
+      .catch(()=>{state.msg={t:"Could not remove the worker. Try again.",err:1};render();});
   }else if(t.id==="rprint"){window.print();
   }else if(t.id==="rsave"){
     const s=state.sales.find(x=>x.id===state.rcpt);
@@ -876,10 +883,12 @@ document.getElementById("main").addEventListener("click",e=>{
   }else if(t.dataset.delask){state.delAsk=t.dataset.delask;state.delErr="";render();const pe=document.getElementById("delpin");if(pe)pe.focus();
   }else if(t.dataset.delcancel){state.delAsk=null;state.delErr="";render();
   }else if(t.dataset.delgo){
-    const me=state.team.find(w=>w.id===state.user),pin=(document.getElementById("delpin")||{}).value||"";
-    if(!me||pin!==me.pin){state.delErr="Incorrect PIN. Nothing was deleted.";render();const pe=document.getElementById("delpin");if(pe)pe.focus();return;}
-    const kind=t.dataset.delgo,n=applyDelete(kind);state.delAsk=null;state.delErr="";
-    state.msg={t:kind==="rcpt"?"Deleted "+n+" receipt"+(n===1?"":"s")+".":"Deleted "+n+" stock batch"+(n===1?"":"es")+(state.delInv.scope==="everything"?" and the medicine list":"")+"."};render();window.scrollTo(0,0);
+    const pin=(document.getElementById("delpin")||{}).value||"",kind=t.dataset.delgo;
+    cloud.verifyPin(pin).then(ok=>{
+      if(!ok){state.delErr="Incorrect PIN. Nothing was deleted.";render();const pe=document.getElementById("delpin");if(pe)pe.focus();return;}
+      const n=applyDelete(kind);state.delAsk=null;state.delErr="";
+      state.msg={t:kind==="rcpt"?"Deleted "+n+" receipt"+(n===1?"":"s")+".":"Deleted "+n+" stock batch"+(n===1?"":"es")+(state.delInv.scope==="everything"?" and the medicine list":"")+"."};render();window.scrollTo(0,0);
+    });
   }else if(t.dataset.tpl){const T=TPL[t.dataset.tpl];downloadText(T[0],T[1]);
   }else if(t.dataset.impclear){state.imp.res=null;state.imp.raw=null;state.imp.file="";state.msg=null;render();
   }else if(t.dataset.impgo){
@@ -988,48 +997,96 @@ document.getElementById("main").addEventListener("change",e=>{
     state.msg={t:"Sale #"+sid+" updated: new total "+money(s.total)+"."};render();
   }
 });
-function fillLogin(){
-  document.getElementById("lw").innerHTML=state.team.filter(w=>w.role!=="Admin").map(w=>`<option value="${w.id}">${esc(w.name)} (${esc(w.role)})</option>`).join("")+'<option value="other">Another account…</option>';
-  document.getElementById("lname").value="";document.getElementById("lname").hidden=document.getElementById("lw").value!=="other";
-  document.getElementById("lp").value="";document.getElementById("lerr").textContent="";
-  const setup=state.team.length===0;
-  document.getElementById("lsetup").hidden=!setup;document.getElementById("lsign").hidden=setup;
-  for(const id of ["sn","sp","sp2"])document.getElementById(id).value="";
-  document.getElementById("lw").onchange=e=>{const o=e.target.value==="other",n=document.getElementById("lname");n.hidden=!o;if(o)n.focus();document.getElementById("lp").value="";syncPinPad();};
+const LASTKEY="pharmacy-lastname";
+const lastName=()=>{try{return localStorage.getItem(LASTKEY)||"";}catch(e){return "";}};
+const setLastName=n=>{try{localStorage.setItem(LASTKEY,n);}catch(e){}};
+let unsubTeam=null,busy=false,setupDone=false;
+const normFac=f=>({name:typeof f.name==="string"&&f.name.trim()?f.name.trim():state.facility.name,logo:typeof f.logo==="string"&&f.logo.startsWith("data:image/")?f.logo:"",phone:typeof f.phone==="string"?f.phone:"",footer:typeof f.footer==="string"?f.footer:state.facility.footer,showCashier:f.showCashier!==false,showChange:f.showChange!==false});
+/* facility name, logo and receipt text are shared by every device */
+if(cloud)cloud.watchFacility(f=>{
+  state.facility=normFac(f);try{localStorage.setItem(FKEY,JSON.stringify(state.facility));}catch(e){}
+  applyFacility();if(state.user&&!state.draft&&["facility","home"].includes(state.view))render();
+});
+function showLoginMode(m){
+  document.getElementById("lconn").hidden=m!=="conn";
+  document.getElementById("lsetup").hidden=m!=="setup";
+  document.getElementById("lsign").hidden=m!=="sign";
 }
-function register(){
+async function checkSetup(){
+  const c=document.getElementById("lconn");showLoginMode("conn");applyFacility();
+  c.onclick=e=>{if(e.target.id==="lretry")checkSetup();};
+  if(!cloud){c.innerHTML='Could not load the sign-in service. Check the internet connection.<br><button type="button" class="btn btn-secondary" id="lretry" style="margin-top:10px">Reload</button>';c.onclick=()=>location.reload();return;}
+  c.textContent="Connecting\u2026";
+  try{setupDone=await cloud.isSetup();fillLogin();}
+  catch(e){c.innerHTML=esc(e.message)+'<br><button type="button" class="btn btn-secondary" id="lretry" style="margin-top:10px">Try again</button>';}
+}
+function fillLogin(){
+  const ln=document.getElementById("lname");ln.value=lastName();
+  document.getElementById("lp").value="";document.getElementById("lerr").textContent="";document.getElementById("lserr").textContent="";
+  for(const id of ["sn","sp","sp2"])document.getElementById(id).value="";
+  pinSel=!ln.value;showLoginMode(setupDone?"sign":"setup");
+  ln.oninput=()=>syncPinPad();
+  syncPinPad();
+}
+/* stock and sales are saved in Firestore (cloud.js): they survive a reload and every device sees the same ones */
+let storeDirty=false;
+const typingNow=()=>{const a=document.activeElement;return !!a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&!!a.closest("main");};
+const storeAdapter={
+  get:()=>({meds:state.meds,catalog:state.catalog,sales:state.sales,nextMed:state.nextMed,nextCat:state.nextCat,nextSale:state.nextSale}),
+  set:d=>{state.meds=d.meds;state.catalog=d.catalog;state.sales=d.sales;state.nextMed=1;state.nextCat=1;state.nextSale=1;},
+  counters:(m,c,s)=>{state.nextMed=Math.max(state.nextMed,m);state.nextCat=Math.max(state.nextCat,c);state.nextSale=Math.max(state.nextSale,s);},
+  /* another device changed something: refresh the screen, but never while someone is typing */
+  changed:()=>{if(!state.user||state.view==="team")return;if(typingNow()){storeDirty=true;return;}render();},
+  error:t=>{state.msg={t,err:1};if(state.user)render();}
+};
+document.addEventListener("focusout",()=>{if(storeDirty)setTimeout(()=>{if(storeDirty&&state.user&&!typingNow()){storeDirty=false;render();}},60);});
+async function onSignedIn(w,first){
+  if(cloud){try{await cloud.openStore(storeAdapter);}catch(e){try{await cloud.logout();}catch(_){}throw e;}}
+  state.fails=0;state.user=w.id;state.as=null;state.msg=null;state.rcpt=null;state.draft=null;state.cart=[];
+  state.team=[w];
+  if(unsubTeam){unsubTeam();unsubTeam=null;}
+  if(w.role==="Admin")unsubTeam=cloud.watchTeam(list=>{if(!state.user)return;state.team=list;if(state.view==="team"&&!state.rdelAsk&&!state.delAsk)render();},()=>{});
+  if(first){state.view="facility";state.msg={t:"Welcome, "+w.name+". You are the administrator. Set your facility name and logo."};}
+  else state.view=isMobile()?"home":(Object.keys(VIEWS).find(allowed)||"dash");
+  try{history.replaceState(null,"",location.pathname+location.search);}catch(e){}
+  showUser(w);render();
+}
+async function register(){
+  if(busy)return;
   const e=document.getElementById("lserr"),name=document.getElementById("sn").value.trim(),pin=document.getElementById("sp").value,pin2=document.getElementById("sp2").value;
   pinSel=false;if(typeof syncPinPad==="function")syncPinPad();
-  if(state.team.length){fillLogin();return;}
   if(!name){e.textContent="Enter your full name.";return;}
   if(pin.length!==4||isNaN(+pin)){e.textContent="Choose a 4-digit PIN.";return;}
   if(pin!==pin2){e.textContent="The PINs do not match.";return;}
-  const w={id:state.nextWorker++,name,role:"Admin",slot:1,owner:true,pin,access:Object.keys(VIEWS)};
-  state.team.push(w);saveTeam();
-  state.fails=0;state.user=w.id;state.as=null;state.rcpt=null;state.draft=null;state.cart=[];
-  state.view="facility";state.msg={t:"Welcome, "+name+". You are the administrator. Set your facility name and logo."};
-  showUser(w);render();
+  busy=true;e.textContent="Creating the account\u2026";
+  try{const w=await cloud.registerOwner(name,pin);setupDone=true;setLastName(name);await onSignedIn(w,true);}
+  catch(err){
+    e.textContent=err.message||"Could not create the account.";
+    if(err.code==="closed"){setupDone=true;setTimeout(fillLogin,2500);}
+    if(err.code==="store")setTimeout(fillLogin,2500);
+  }finally{busy=false;}
 }
-function signIn(){
+async function signIn(){
+  if(busy)return false;
   const err=document.getElementById("lerr"),btn=document.getElementById("lgo"),pe=document.getElementById("lp");
-  const sel=document.getElementById("lw").value,nm=document.getElementById("lname").value.trim().toLowerCase(),pin=pe.value;
-  const w=sel==="other"?state.team.find(x=>x.role==="Admin"&&x.name.toLowerCase()===nm):state.team.find(x=>x.id===+sel);
-  if(sel==="other"&&!nm){err.textContent="Enter your full name.";return;}
-  if(!w&&sel!=="other"){err.textContent="Choose a worker.";return;}
-  if(pin.length!==4||isNaN(+pin)){err.textContent="Enter your 4-digit PIN.";return;}
-  if(!w||pin!==w.pin){
-    state.fails++;pe.value="";
-    if(state.fails>=3){
-      state.fails=0;btn.disabled=true;let s=30;err.textContent="Too many tries. Wait "+s+" seconds.";
-      const t=setInterval(()=>{s--;if(s<=0){clearInterval(t);btn.disabled=false;err.textContent="";}else err.textContent="Too many tries. Wait "+s+" seconds.";},1000);
-    }else err.textContent="Incorrect details. Try again.";
-    return;
-  }
-  state.fails=0;state.user=w.id;state.as=null;state.msg=null;state.rcpt=null;state.draft=null;state.cart=[];
-  state.view=isMobile()?"home":(Object.keys(VIEWS).find(allowed)||"dash");
-  try{history.replaceState(null,"",location.pathname+location.search);}catch(e){}
-  showUser(w);
-  pe.value="";render();
+  const name=document.getElementById("lname").value.trim(),pin=pe.value;
+  if(!name){err.textContent="Enter your full name.";pinSel=true;syncPinPad();return false;}
+  if(pin.length!==4||isNaN(+pin)){err.textContent="Enter your 4-digit PIN.";return false;}
+  busy=true;err.textContent="Signing in\u2026";
+  try{
+    const w=await cloud.login(name,pin);
+    setLastName(name);pe.value="";err.textContent="";await onSignedIn(w,false);return true;
+  }catch(ex){
+    pe.value="";
+    if(ex.code==="bad"){
+      state.fails++;
+      if(state.fails>=3){
+        state.fails=0;btn.disabled=true;let s=30;err.textContent="Too many tries. Wait "+s+" seconds.";
+        const t=setInterval(()=>{s--;if(s<=0){clearInterval(t);btn.disabled=false;err.textContent="";}else err.textContent="Too many tries. Wait "+s+" seconds.";},1000);
+      }else err.textContent="Incorrect details. Try again.";
+    }else err.textContent=ex.message||"Could not sign in.";
+    return false;
+  }finally{busy=false;}
 }
 /* ---- iPhone-style PIN pad (phones only). #lp still holds the digits, so signIn() is unchanged. ---- */
 const PINL={2:"ABC",3:"DEF",4:"GHI",5:"JKL",6:"MNO",7:"PQRS",8:"TUV",9:"WXYZ"};
@@ -1040,14 +1097,13 @@ let pinSel=false;
   document.getElementById("pkeys").innerHTML=h;
 })();
 function syncPinPad(){
-  const m=isMobile(),ls=document.getElementById("lsign"),lp=document.getElementById("lp"),sel=document.getElementById("lw");
+  const m=isMobile(),ls=document.getElementById("lsign"),lp=document.getElementById("lp"),ln=document.getElementById("lname");
   ls.classList.toggle("pinmode",m);document.getElementById("pinpad").hidden=!m;if(!m)return;
-  const other=sel.value==="other",w=state.team.find(x=>x.id===+sel.value);
-  ls.classList.toggle("showsel",pinSel||other);
-  document.getElementById("pwho").textContent=other?"Administrator":(w?w.name:"");
-  document.getElementById("pwr").textContent=other?"Type your full name above":(w?w.role:"");
-  document.getElementById("pchange").textContent=pinSel||other?"Hide the list":"Not you? Change";
-  document.getElementById("pchange").hidden=other;
+  ls.classList.toggle("showsel",pinSel);
+  document.getElementById("pwho").textContent=ln.value.trim()||"Your name";
+  document.getElementById("pwr").textContent=pinSel?"Type your full name above":"";
+  document.getElementById("pchange").textContent=pinSel?"Hide the name box":"Not you? Change";
+  document.getElementById("pchange").hidden=false;
   document.querySelectorAll("#pdots span").forEach((d,i)=>d.classList.toggle("on",i<lp.value.length));
 }
 function pinAdd(d){
@@ -1056,22 +1112,22 @@ function pinAdd(d){
   syncPinPad();if(lp.value.length===4)setTimeout(pinGo,160);
 }
 function pinGo(){
-  const lp=document.getElementById("lp");if(lp.value.length!==4||state.user)return;
-  signIn();syncPinPad();
-  if(!state.user){const p=document.getElementById("pdots");p.classList.remove("shake");void p.offsetWidth;p.classList.add("shake");try{navigator.vibrate&&navigator.vibrate(120);}catch(e){}}
+  const lp=document.getElementById("lp");if(lp.value.length!==4||state.user||busy)return;
+  signIn().then(ok=>{syncPinPad();
+    if(!ok&&!state.user){const p=document.getElementById("pdots");p.classList.remove("shake");void p.offsetWidth;p.classList.add("shake");try{navigator.vibrate&&navigator.vibrate(120);}catch(e){}}});
 }
 document.getElementById("pkeys").onclick=e=>{const b=e.target.closest("[data-pk]");if(b)pinAdd(b.dataset.pk);};
-document.getElementById("pchange").onclick=()=>{pinSel=!pinSel;syncPinPad();};
+document.getElementById("pchange").onclick=()=>{pinSel=!pinSel;syncPinPad();if(pinSel)document.getElementById("lname").focus();};
 document.addEventListener("keydown",e=>{
   const lg=document.getElementById("login");if(lg.classList.contains("out")||document.getElementById("pinpad").hidden||document.getElementById("lsign").hidden)return;
   if(/^(INPUT|SELECT|TEXTAREA)$/.test((document.activeElement||{}).tagName))return;
   if(/^[0-9]$/.test(e.key))pinAdd(e.key);else if(e.key==="Backspace")pinAdd("del");
 });
 MQ.addEventListener?MQ.addEventListener("change",syncPinPad):MQ.addListener(syncPinPad);
-document.getElementById("lgo").onclick=signIn;
-document.getElementById("lw").onchange=e=>{const o=e.target.value==="other",n=document.getElementById("lname");n.hidden=!o;if(o)n.focus();};
+document.getElementById("lgo").onclick=()=>{signIn();};
+document.getElementById("lname").onkeydown=e=>{if(e.key==="Enter")document.getElementById("lp").focus();};
 document.getElementById("lp").onkeydown=e=>{if(e.key==="Enter")signIn();};
-document.getElementById("lsgo").onclick=register;
+document.getElementById("lsgo").onclick=()=>{register();};
 document.getElementById("sp2").onkeydown=e=>{if(e.key==="Enter")register();};
 document.getElementById("userBtn").onclick=()=>{document.getElementById("userPanel").hidden?openUserMenu():closeUserMenu(true);};
 document.querySelectorAll("[data-th]").forEach(b=>b.onclick=()=>applyPharmacyTheme(b.dataset.th));
@@ -1084,8 +1140,8 @@ document.addEventListener("keydown",e=>{
 document.getElementById("umenu").addEventListener("focusout",e=>{if(e.relatedTarget&&!e.relatedTarget.closest("#umenu"))closeUserMenu(false);});
 applyPharmacyTheme(document.documentElement.dataset.themePref);
 document.getElementById("signout").onclick=()=>{closeUserMenu(false);
-  state.user=null;state.as=null;state.draft=null;hideUser();fillLogin();render();
+  state.user=null;state.as=null;state.draft=null;state.team=[];if(unsubTeam){unsubTeam();unsubTeam=null;}if(cloud)cloud.logout();hideUser();fillLogin();render();
   const lg=document.getElementById("login");lg.style.display="none";void lg.offsetHeight;lg.style.display="";
 };
-fillLogin();syncPinPad();
+checkSetup();
 render();

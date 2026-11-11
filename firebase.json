@@ -3,8 +3,14 @@
     "public": ".",
     "ignore": [
       "firebase.json",
+      "firestore.rules",
       "**/.*",
-      "**/node_modules/**"
-,"Pharmacy.gitignore"]
+      "**/node_modules/**",
+      "pharmacy.gitignore",
+      "Pharmacy.gitignore"
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
   }
 }

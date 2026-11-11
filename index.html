@@ -34,6 +34,7 @@
 <img id="llogo" class="llogo" alt="" hidden>
 <svg class="lart" viewBox="0 0 160 60" aria-hidden="true"><text class="lnm" id="ltitle" x="80" y="34" text-anchor="middle">Macro Medical Centre</text><g class="ldp"><path class="llf" d="M80 19H59a11 11 0 0 0 0 22H80Z"/><path class="lrt" d="M80 19H101a11 11 0 0 1 0 22H80Z"/></g></svg>
 <div class="lform">
+<p class="hint" id="lconn" style="text-align:center">Connecting&hellip;</p>
 <div id="lsetup" hidden>
 <p class="hint" style="text-align:center">Welcome. Create the first account. It becomes the administrator.</p>
 <label for="sn">Your full name</label><input id="sn" autocomplete="off" placeholder="Full name">
@@ -42,9 +43,8 @@
 <p class="lerr" id="lserr" role="alert"></p>
 <button class="btn btn-primary wide" id="lsgo" type="button">Create admin account</button>
 </div>
-<div id="lsign">
-<label for="lw">Worker</label><select id="lw"></select>
-<input id="lname" style="margin-top:8px" autocomplete="off" placeholder="Full name" aria-label="Full name" hidden>
+<div id="lsign" hidden>
+<label for="lname">Your name</label><input id="lname" autocomplete="username" placeholder="Full name">
 <div id="pinpad" class="pinpad" hidden>
 <div class="pwho" id="pwho"></div><div class="pwr" id="pwr"></div>
 <button type="button" class="plink" id="pchange">Not you? Change</button>
@@ -67,6 +67,10 @@
 <button data-v="facility">Facility</button>
 </nav>
 </div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="cloud.js"></script>
 <script src="pharmacy.js"></script>
 </body>
 </html>
