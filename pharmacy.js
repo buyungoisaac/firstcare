@@ -224,6 +224,12 @@ function mrows(){
    :`<tr><td>${esc(c.name)}</td><td>${esc(c.unit||"\u2014")}</td><td>${money(c.price)}</td><td>${c.min}</td><td><div class="acts"><button class="btn btn-secondary btn-sm" data-eedit="${c.id}" type="button">Edit</button><button class="btn btn-secondary btn-sm" data-edel="${c.id}" type="button">Delete</button></div></td></tr>`).join("")
    +(all.length>50?`<tr><td colspan="5">Showing 50 of ${all.length}. Search to narrow the list.</td></tr>`:"");
 }
+/* administrators can delete one stock batch; confirmed with their PIN like the other deletes */
+function batchDelBox(){
+  const m=isAdmin()&&state.bdelAsk?medById(state.bdelAsk):null;
+  if(!m)return "";
+  return `<div class="dangerbox" role="alertdialog" aria-label="Confirm delete stock batch"><p><b>This cannot be undone.</b> The batch of <b>${esc(m.name)}</b> (${m.qty} in stock, expires ${esc(m.exp)}) will be deleted for good. The medicine stays in the medicine list.</p><label for="bdelpin">Enter your PIN to confirm</label><input id="bdelpin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="4-digit PIN">${state.bdelErr?`<p class="lerr" role="alert" style="display:block;margin:6px 0 0">${esc(state.bdelErr)}</p>`:""}<div class="acts left" style="padding-left:0;margin-top:10px"><button class="btn btn-danger" data-bdelgo="${m.id}" type="button">Delete permanently</button><button class="btn btn-secondary" data-bdelcancel="1" type="button">Cancel</button></div></div>`;
+}
 function inv(){
   const cost=state.meds.reduce((a,m)=>a+m.qty*m.cost,0),units=state.meds.reduce((a,m)=>a+m.qty,0);
   const sorted=[...state.meds].sort((x,y)=>keyOf(x.name)<keyOf(y.name)?-1:keyOf(x.name)>keyOf(y.name)?1:byExp(x,y));
@@ -244,7 +250,8 @@ function inv(){
    <div class="card stat"><b>${state.meds.length}</b><span>Stock entries</span></div>
    <div class="card stat"><b>${units}</b><span>Total units in stock</span></div>
   </div>
-  <section class="card panel"><div class="wrap"><table><thead><tr><th>Products</th><th>Quantity</th><th>Cost price</th><th>Selling price</th><th>Expiry date</th><th>Line cost</th><th>Status</th></tr></thead><tbody>${sorted.length?sorted.map(m=>`<tr><td>${esc(m.name)}</td><td>${m.qty}</td><td>${money(m.cost)}</td><td>${money(m.sell)}</td><td>${m.exp}</td><td>${money(m.qty*m.cost)}</td><td>${medStatus(m).h}</td></tr>`).join(""):`<tr><td colspan="7" class="empty">No products in inventory yet</td></tr>`}</tbody></table></div></section>
+  <section class="card panel"><div class="wrap"><table><thead><tr><th>Products</th><th>Quantity</th><th>Cost price</th><th>Selling price</th><th>Expiry date</th><th>Line cost</th><th>Status</th>${isAdmin()?"<th></th>":""}</tr></thead><tbody>${sorted.length?sorted.map(m=>`<tr><td>${esc(m.name)}</td><td>${m.qty}</td><td>${money(m.cost)}</td><td>${money(m.sell)}</td><td>${m.exp}</td><td>${money(m.qty*m.cost)}</td><td>${medStatus(m).h}</td>${isAdmin()?`<td><div class="acts"><button class="btn btn-secondary btn-sm" data-bdelask="${m.id}" type="button">Delete</button></div></td>`:""}</tr>`).join(""):`<tr><td colspan="${isAdmin()?8:7}" class="empty">No products in inventory yet</td></tr>`}</tbody></table></div></section>
+  ${batchDelBox()}
   <div class="total"><span>Total cost of inventory</span><b>${money(cost)}</b></div>
   <details class="manage"${state.open?" open":""} ontoggle="state.open=this.open"><summary>Manage medicines (${state.catalog.length})</summary>
    <div class="card panel"><div class="entry" style="padding-top:0"><h2 style="margin:0">Medicines</h2><button class="btn btn-primary btn-sm" id="addmedbtn" type="button">${state.addMed?"Close":"Add medicine"}</button></div>
@@ -349,6 +356,8 @@ function rcpt(){
 }
 const VIEWS={dash:"Dashboard",inv:"Inventory",pos:"POS",rcpt:"Receipts",rx:"Prescriptions",team:"Team",facility:"Facility"};
 const ROLES={Cashier:["pos","rcpt"],Pharmacist:["dash","inv","rx","rcpt"],"Stock clerk":["inv"],Admin:Object.keys(VIEWS)};
+/* remembered choices: the add-worker form and the edit panel keep the role and access ticks across redraws */
+state.wf={role:"Cashier",acc:[...ROLES.Cashier]};state.wedit=null;state.wef=null;
 const allowed=v=>{const w=state.team.find(x=>x.id===(state.as||state.user));return !!w&&w.access.includes(v);};
 function banner(){const w=state.team.find(x=>x.id===state.as);return `<div class="msg" role="status">Previewing as ${esc(w.name)} (${esc(w.role)}). <button class="btn btn-secondary btn-sm" id="exitprev" type="button">Exit preview</button></div>`;}
 function home(){
@@ -644,21 +653,28 @@ function debtsTab(){
     <div class="grid2" style="margin:10px 16px 0"><div><label for="dpa${x.id}">Amount paid now</label><input id="dpa${x.id}" type="number" min="0" inputmode="decimal" placeholder="${o}"></div><div><label for="dpm${x.id}">Paid by</label><select id="dpm${x.id}">${["Cash","Mobile money","Card"].map(m=>`<option>${m}</option>`).join("")}</select></div></div>
     <div class="acts left"><button class="btn btn-primary btn-sm" data-dpay="${x.id}" type="button">Record payment</button><button class="btn btn-secondary btn-sm" data-dfull="${x.id}" type="button">Paid in full (${money(o)})</button><button class="btn btn-secondary btn-sm" data-rview="${x.id}" type="button">View receipt</button></div></div>`;}).join(""):`<div class="empty">No debts. Everyone has paid.</div>`}</section>`;
 }
+/* change a worker's role and access (administrators only; the owner and yourself are not editable) */
+function editBox(w){
+  const f=state.wef;
+  return `<div class="cpbox"><label for="erole">Role</label><select id="erole">${Object.keys(ROLES).map(r=>`<option${f.role===r?" selected":""}>${r}</option>`).join("")}</select>
+   <fieldset class="acc"><legend>What this worker can access</legend>${Object.keys(VIEWS).map(k=>`<label class="chk"><input type="checkbox" data-eacc="${k}"${f.acc.includes(k)?" checked":""}> ${VIEWS[k]}</label>`).join("")}</fieldset>
+   <div class="acts left" style="padding-left:0"><button class="btn btn-primary btn-sm" data-wsave="${w.id}" type="button">Save changes</button><button class="btn btn-secondary btn-sm" data-wcancel="1" type="button">Cancel</button></div></div>`;
+}
 function workersTab(){
   const free=[];for(let i=1;i<=state.slots;i++)if(!state.team.some(w=>w.slot===i))free.push(i);
   return `
   <div class="stats3"><div class="card stat"><b>${state.team.length} of ${state.slots}</b><span>Slots in use</span></div><div class="card stat"><b>${free.length}</b><span>Slots free</span></div></div>
   <section class="card panel"><h2>Add a worker</h2>
-   <label for="wn">Full name</label><input id="wn" autocomplete="off" placeholder="e.g. Grace Namuli">
+   <label for="wn">Full name</label><input id="wn" autocomplete="off" placeholder="e.g. Macro Trades">
    <label for="wpin">PIN (4 digits)</label><input id="wpin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" placeholder="4-digit PIN">
-   <label for="wrole" class="gap">Role</label><select id="wrole">${Object.keys(ROLES).map(r=>`<option>${r}</option>`).join("")}</select>
-   <fieldset class="acc"><legend>What this worker can access</legend>${Object.keys(VIEWS).map(k=>`<label class="chk"><input type="checkbox" data-acc="${k}"${ROLES.Cashier.includes(k)?" checked":""}> ${VIEWS[k]}</label>`).join("")}</fieldset>
+   <label for="wrole" class="gap">Role</label><select id="wrole">${Object.keys(ROLES).map(r=>`<option${state.wf.role===r?" selected":""}>${r}</option>`).join("")}</select>
+   <fieldset class="acc"><legend>What this worker can access</legend>${Object.keys(VIEWS).map(k=>`<label class="chk"><input type="checkbox" data-acc="${k}"${state.wf.acc.includes(k)?" checked":""}> ${VIEWS[k]}</label>`).join("")}</fieldset>
    <label for="wslot">Slot</label><select id="wslot">${free.map(i=>`<option value="${i}">Slot ${i}</option>`).join("")}</select>
    <button class="btn btn-primary wide gap" id="addWorker" type="button"${free.length?"":" disabled"}>Assign slot</button>
    ${free.length?"":`<p class="hint">All slots are in use. Remove a worker to free a slot.</p>`}
   </section>
   <h2>Workers</h2>
-  <section class="card list">${state.team.map(w=>`<div class="wk"><div class="entry"><div><b>${esc(w.name)}</b><small>${esc(w.role)}, Slot ${w.slot}</small></div>${badge("success","&#10003;","Active")}</div><div class="line"><span>${w.access.map(k=>VIEWS[k]).join(", ")}</span></div><div class="acts left"><button class="btn btn-secondary btn-sm" data-prev="${w.id}" type="button">Preview access</button>${w.owner||w.id===state.user?"":`<button class="btn btn-secondary btn-sm" data-rmw="${w.id}" type="button">Remove</button>`}</div></div>`).join("")}</section>`;
+  <section class="card list">${state.team.map(w=>`<div class="wk"><div class="entry"><div><b>${esc(w.name)}</b><small>${esc(w.role)}, Slot ${w.slot}</small></div>${badge("success","&#10003;","Active")}</div><div class="line"><span>${w.access.map(k=>VIEWS[k]).join(", ")}</span></div><div class="acts left"><button class="btn btn-secondary btn-sm" data-prev="${w.id}" type="button">Preview access</button>${w.owner||w.id===state.user?"":`<button class="btn btn-secondary btn-sm" data-wedit="${w.id}" type="button">Edit</button><button class="btn btn-secondary btn-sm" data-rmw="${w.id}" type="button">Remove</button>`}</div>${state.wedit===w.id&&state.wef?editBox(w):""}</div>`).join("")}</section>`;
 }
 function rx(){
   return `<h1>Prescriptions</h1>${msg()}
@@ -729,7 +745,7 @@ function render(){
 }
 function go(v){
   if(isMobile()&&v!=="home"&&state.view==="home")try{history.pushState({v},"",location.pathname+location.search+"#"+v);}catch(e){}
-  state.view=v;state.msg=null;state.rcpt=null;state.draft=null;state.teamTab="workers";state.facTab="details";state.rcptTab="all";render();window.scrollTo(0,0);
+  state.view=v;state.msg=null;state.rcpt=null;state.draft=null;state.teamTab="workers";state.facTab="details";state.rcptTab="all";state.bdelAsk=null;state.wedit=null;render();window.scrollTo(0,0);
 }
 window.addEventListener("popstate",()=>{if(!state.user)return;state.msg=null;state.rcpt=null;state.draft=null;if(isMobile())state.view="home";render();});
 if(MQ.addEventListener)MQ.addEventListener("change",()=>render());
@@ -853,6 +869,17 @@ document.getElementById("main").addEventListener("click",e=>{
       state.sales=state.sales.filter(x=>x.id!==id);state.rcpt=null;state.rdelAsk=false;state.rdelErr="";
       state.msg={t:"Receipt #"+id+" deleted."};render();window.scrollTo(0,0);
     });
+  }else if(t.dataset.bdelask){if(!isAdmin())return;state.bdelAsk=+t.dataset.bdelask;state.bdelErr="";render();const pe=document.getElementById("bdelpin");if(pe)pe.focus();
+  }else if(t.dataset.bdelcancel){state.bdelAsk=null;state.bdelErr="";render();
+  }else if(t.dataset.bdelgo){
+    const pin=(document.getElementById("bdelpin")||{}).value||"",id=+t.dataset.bdelgo;
+    if(!isAdmin())return;
+    cloud.verifyPin(pin).then(ok=>{
+      if(!ok){state.bdelErr="Incorrect PIN. Nothing was deleted.";render();const pe=document.getElementById("bdelpin");if(pe)pe.focus();return;}
+      const m=medById(id);state.meds=state.meds.filter(x=>x.id!==id);
+      state.cart=state.cart.filter(l=>sellable(l.name)>0);state.cart.forEach(l=>{l.qty=Math.min(l.qty,lineMax(l));});
+      state.bdelAsk=null;state.bdelErr="";state.msg={t:"Deleted the "+(m?m.name:"")+" stock batch."};render();window.scrollTo(0,0);
+    });
   }else if(t.id==="addWorker"){
     const name=wn.value.trim(),access=[...document.querySelectorAll("[data-acc]:checked")].map(c=>c.dataset.acc),slot=+wslot.value,pin=wpin.value.trim();
     if(pin.length!==4||isNaN(+pin)){state.msg={t:"Enter a 4-digit PIN for the worker.",err:1};return render();}
@@ -860,12 +887,23 @@ document.getElementById("main").addEventListener("click",e=>{
     if(!isAdmin())return;
     if(state.team.some(w=>w.name.toLowerCase()===name.toLowerCase())){state.msg={t:"A worker with that name already exists.",err:1};return render();}
     t.disabled=true;state.msg={t:"Adding "+name+"\u2026"};render();
-    cloud.createWorker({name,pin,role:wrole.value,slot,access}).then(()=>{state.msg={t:name+" is assigned to slot "+slot+" with access to "+access.length+" areas. They can now sign in on any device with their name and PIN."};render();})
+    cloud.createWorker({name,pin,role:wrole.value,slot,access}).then(()=>{state.wf={role:"Cashier",acc:[...ROLES.Cashier]};state.msg={t:name+" is assigned to slot "+slot+" with access to "+access.length+" areas. They can now sign in on any device with their name and PIN."};render();})
       .catch(err=>{state.msg={t:err.message||"Could not add the worker.",err:1};render();});
   }else if(t.dataset.prev){
     state.as=t.dataset.prev;state.msg=null;state.rcpt=null;state.draft=null;
     state.view=isMobile()?"home":(Object.keys(VIEWS).find(allowed)||state.view);render();
   }else if(t.id==="exitprev"){state.as=null;state.draft=null;state.view=allowed("team")?"team":Object.keys(VIEWS).find(allowed)||"dash";render();
+  }else if(t.dataset.wedit){
+    if(!isAdmin())return;const w=state.team.find(x=>x.id===t.dataset.wedit);if(!w||w.owner||w.id===state.user)return;
+    state.wedit=w.id;state.wef={role:w.role,acc:[...w.access]};state.msg=null;render();
+  }else if(t.dataset.wcancel){state.wedit=null;state.wef=null;render();
+  }else if(t.dataset.wsave){
+    if(!isAdmin())return;const id=t.dataset.wsave,w=state.team.find(x=>x.id===id),f=state.wef;
+    if(!w||!f||state.wedit!==id)return;
+    if(!f.acc.length){state.msg={t:"Choose at least one area this worker can access.",err:1};return render();}
+    t.disabled=true;
+    cloud.updateWorker(id,{role:f.role,access:f.acc}).then(()=>{state.wedit=null;state.wef=null;state.msg={t:w.name+" is now "+f.role+" with access to "+f.acc.length+" area"+(f.acc.length===1?"":"s")+". It applies the next time they sign in."};render();})
+      .catch(()=>{state.msg={t:"Could not save the changes. Try again.",err:1};render();});
   }else if(t.dataset.rmw){
     if(!isAdmin())return;
     cloud.removeWorker(t.dataset.rmw).then(()=>{state.msg={t:"Worker removed. They can no longer sign in, and their slot is free."};render();})
@@ -974,7 +1012,10 @@ document.getElementById("main").addEventListener("change",e=>{
       im.file=f.name;im.raw=rows;im.hasHeader=true;im.map=guessMap(rows[0],im.type);importRecalc();render();};
     r.readAsText(f);return;
   }
-  if(t.id==="wrole"){document.querySelectorAll("[data-acc]").forEach(c=>c.checked=ROLES[t.value].includes(c.dataset.acc));return;}
+  if(t.id==="wrole"){state.wf={role:t.value,acc:[...ROLES[t.value]]};document.querySelectorAll("[data-acc]").forEach(c=>c.checked=state.wf.acc.includes(c.dataset.acc));return;}
+  if(t.dataset.acc){state.wf.acc=[...document.querySelectorAll("[data-acc]:checked")].map(c=>c.dataset.acc);return;}
+  if(t.id==="erole"&&state.wef){state.wef={role:t.value,acc:[...ROLES[t.value]]};document.querySelectorAll("[data-eacc]").forEach(c=>c.checked=state.wef.acc.includes(c.dataset.eacc));return;}
+  if(t.dataset.eacc&&state.wef){state.wef.acc=[...document.querySelectorAll("[data-eacc]:checked")].map(c=>c.dataset.eacc);return;}
   if(t.id==="flogo"){
     const f=t.files&&t.files[0];if(!f||!state.draft)return;
     readLogo(f).then(url=>{state.draft.logo=url;state.msg=null;render();}).catch(()=>{state.msg={t:"That image could not be read. Try a PNG or JPG file.",err:1};render();});
@@ -1027,7 +1068,33 @@ function fillLogin(){
   pinSel=!ln.value;showLoginMode(setupDone?"sign":"setup");
   ln.oninput=()=>syncPinPad();
   syncPinPad();
+  /* the staff names are read again each time the sign-in screen is shown */
+  loadRoster().then(()=>{ln.setAttribute("inputmode",isMobile()&&roster.length?"none":"text");});
 }
+/* sign-in name list: tap the name box and pick a name. The list (names only) is kept in meta/roster by administrators. */
+let roster=[],rosterKey="";
+async function loadRoster(){try{roster=cloud?await cloud.getRoster():[];}catch(e){roster=[];}}
+function syncRoster(list){
+  const names=list.map(w=>w.name).sort((a,b)=>a.localeCompare(b)),k=JSON.stringify(names);
+  if(k===rosterKey)return;rosterKey=k;
+  cloud.saveRoster(names).catch(()=>{rosterKey="";});
+}
+(function(){
+  const ln=document.getElementById("lname"),box=document.createElement("div"),dd=document.createElement("div");
+  box.className="combo";dd.className="dd";dd.id="lnames";dd.hidden=true;dd.setAttribute("role","listbox");dd.setAttribute("aria-label","Staff names");
+  ln.parentNode.insertBefore(box,ln);box.appendChild(ln);box.appendChild(dd);
+  const list=()=>{const v=ln.value.trim().toLowerCase();return !v||roster.some(n=>n.toLowerCase()===v)?roster:roster.filter(n=>n.toLowerCase().includes(v));};
+  const show=()=>{const m=list();if(!m.length){dd.hidden=true;return;}dd.innerHTML=m.map(n=>`<button type="button" role="option" data-n="${esc(n)}">${esc(n)}</button>`).join("");dd.hidden=false;};
+  ln.addEventListener("focus",show);ln.addEventListener("click",show);ln.addEventListener("input",show);
+  ln.addEventListener("keydown",e=>{if(e.key==="Escape")dd.hidden=true;});
+  dd.addEventListener("mousedown",e=>e.preventDefault());
+  dd.addEventListener("click",e=>{
+    const b=e.target.closest("[data-n]");if(!b)return;
+    ln.value=b.dataset.n;dd.hidden=true;pinSel=false;document.getElementById("lerr").textContent="";syncPinPad();
+    if(!isMobile())document.getElementById("lp").focus();
+  });
+  document.addEventListener("click",e=>{if(e.target!==ln&&!e.target.closest("#lnames"))dd.hidden=true;});
+})();
 /* stock and sales are saved in Firestore (cloud.js): they survive a reload and every device sees the same ones */
 let storeDirty=false;
 const typingNow=()=>{const a=document.activeElement;return !!a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&!!a.closest("main");};
@@ -1045,7 +1112,7 @@ async function onSignedIn(w,first){
   state.fails=0;state.user=w.id;state.as=null;state.msg=null;state.rcpt=null;state.draft=null;state.cart=[];
   state.team=[w];
   if(unsubTeam){unsubTeam();unsubTeam=null;}
-  if(w.role==="Admin")unsubTeam=cloud.watchTeam(list=>{if(!state.user)return;state.team=list;if(state.view==="team"&&!state.rdelAsk&&!state.delAsk)render();},()=>{});
+  if(w.role==="Admin")unsubTeam=cloud.watchTeam(list=>{if(!state.user)return;state.team=list;syncRoster(list);if(state.view==="team"&&!state.rdelAsk&&!state.delAsk)render();},()=>{});
   if(first){state.view="facility";state.msg={t:"Welcome, "+w.name+". You are the administrator. Set your facility name and logo."};}
   else state.view=isMobile()?"home":(Object.keys(VIEWS).find(allowed)||"dash");
   try{history.replaceState(null,"",location.pathname+location.search);}catch(e){}

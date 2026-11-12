@@ -30,6 +30,12 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Names shown on the sign-in screen so people can tap theirs. Names only, never PINs. Kept up to date by administrators.
+    match /meta/roster {
+      allow get: if true;
+      allow write: if isAdmin();
+    }
+
     // Facility name/logo/receipt text: readable on the login screen, changed only by administrators.
     match /meta/facility {
       allow get: if true;

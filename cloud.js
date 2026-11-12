@@ -30,7 +30,7 @@ const cloud=(function(){
      Collections: stock (one document per batch), catalog (the medicine list), sales (one per receipt).
      meta/store marks that saving has been set up and keeps the next receipt/batch numbers.
      The app code hands in an adapter (see pharmacy.js) so this layer never touches the screen. */
-  const SEED_STARTER=false; /* very first run only: save the starter medicines already on screen. Set to false to start empty. */
+  const SEED_STARTER=true; /* very first run only: save the starter medicines already on screen. Set to false to start empty. */
   const COLS=["stock","catalog","sales"],FIELD={stock:"meds",catalog:"catalog",sales:"sales"};
   const SORT={stock:(a,b)=>a.id-b.id,catalog:(a,b)=>a.id-b.id,sales:(a,b)=>b.id-a.id}; /* receipts newest first, like the app keeps them */
   /* same text for the same data whatever the key order, so Firestore's key order never looks like a change */
@@ -249,6 +249,12 @@ const cloud=(function(){
     watchTeam(cb,onErr){
       return db.collection("workers").onSnapshot(s=>cb(s.docs.map(wfrom).sort((a,b)=>(a.slot||0)-(b.slot||0))),e=>{if(onErr)onErr(e);});
     },
+    /* names shown on the sign-in screen (names only, no PINs); administrators keep the list up to date */
+    async getRoster(){
+      try{const s=await db.doc("meta/roster").get();const n=s.exists?(s.data()||{}).names:null;return Array.isArray(n)?n.filter(x=>typeof x==="string"):[];}
+      catch(e){return [];}
+    },
+    saveRoster(names){return db.doc("meta/roster").set({names});},
     /* facility name/logo/receipt settings, shared by every device */
     watchFacility(cb){
       return db.doc("meta/facility").onSnapshot(s=>{if(s.exists)cb(s.data());},()=>{});
