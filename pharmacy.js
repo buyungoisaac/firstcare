@@ -311,6 +311,37 @@ function creditForm(){
    <label for="cdue">Promised to pay by (optional)</label><input id="cdue" type="date" value="${esc(c.due)}">
    <p class="hint" id="cbal" role="status">${credText()}</p></div>`;
 }
+/* ---- POS: choose the date of a sale (any past day). The receipt records who changed the date. ---- */
+const CAL_ICON='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
+function saleDay(){ /* the chosen day, or null when nothing is chosen (today) */
+  const v=state.saleDate;if(!v)return null;
+  const [y,m,d]=v.split("-").map(Number),dt=new Date(y,m-1,d),t=new Date();t.setHours(0,0,0,0);
+  return dt<t?dt:null;
+}
+function saleStamp(){ /* when the sale happened: the chosen day with the time it is now */
+  const now=new Date(),day=saleDay();
+  if(!day)return {ts:now.getTime(),time:now.toLocaleString("en-GB"),changed:false};
+  const at=new Date(day.getFullYear(),day.getMonth(),day.getDate(),now.getHours(),now.getMinutes(),now.getSeconds());
+  return {ts:at.getTime(),time:at.toLocaleString("en-GB"),changed:true};
+}
+function calendarHtml(){
+  const t=new Date(),today=new Date(t.getFullYear(),t.getMonth(),t.getDate()),sel=saleDay()||today;
+  const cm=state.calM||{y:sel.getFullYear(),m:sel.getMonth()};
+  const lead=(new Date(cm.y,cm.m,1).getDay()+6)%7,n=new Date(cm.y,cm.m+1,0).getDate(),pn=new Date(cm.y,cm.m,0).getDate();
+  const isNow=cm.y===today.getFullYear()&&cm.m===today.getMonth();
+  let cells="";
+  for(let i=lead;i>0;i--)cells+=`<span class="cd dim" aria-hidden="true">${pn-i+1}</span>`;
+  for(let d=1;d<=n;d++){
+    const dt=new Date(cm.y,cm.m,d),fut=dt>today,isT=+dt===+today,isS=+dt===+sel;
+    cells+=`<button type="button" class="cd${fut?" off":""}${isT?" today":""}${isS?" sel":""}"${fut?" disabled":""} data-cald="${ymd(dt)}" aria-label="${dt.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}"${isS?' aria-pressed="true"':""}>${d}</button>`;
+  }
+  return `<div class="calpop" role="dialog" aria-label="Choose the sale date"><div class="calh"><button type="button" class="calnav" data-calnav="-1" aria-label="Previous month">&#8249;</button><b>${new Date(cm.y,cm.m,1).toLocaleDateString("en-GB",{month:"long",year:"numeric"})}</b><button type="button" class="calnav" data-calnav="1" aria-label="Next month"${isNow?" disabled":""}>&#8250;</button></div><div class="calw" aria-hidden="true"><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span></div><div class="calg">${cells}</div><div class="calf"><button type="button" class="plink" id="caltoday">Today</button></div></div>`;
+}
+function dateRow(){
+  const day=saleDay();
+  return `<div class="daterow"><span class="lbl">Sale date</span>${day?`<button type="button" class="plink" id="calreset">Back to today</button>`:""}<button type="button" id="calbtn" class="btn btn-sm datebtn${day?" changed":" btn-secondary"}" aria-haspopup="dialog" aria-expanded="${state.calOpen?"true":"false"}">${CAL_ICON} ${day?fdate(day):"Today"}</button>${state.calOpen?calendarHtml():""}</div>`;
+}
+const datedNote=s=>s.dated?`<small class="meta">Date changed by ${esc(s.datedBy||"a worker")}. Entered on ${esc(s.entered||"")}.</small>`:"";
 function pos(){
   const total=state.cart.reduce((a,l)=>a+l.qty*l.price,0);
   return `<h1>Point of sale</h1>${msg()}
@@ -321,10 +352,11 @@ function pos(){
   <label for="pm">Payment method</label><select id="pm">${PAYM.map(o=>`<option${o===state.payMethod?" selected":""}>${o}</option>`).join("")}</select>
   ${state.payMethod==="On credit"?creditForm():""}
   ${state.payMethod==="Cash"?`<label for="pr" class="gap">Cash received (optional)</label><input id="pr" type="number" min="0" inputmode="decimal" placeholder="Amount given by the customer" value="${esc(state.received)}"><p class="hint" id="chg" role="status">${chgText()}</p>`:""}
+  ${dateRow()}
   <button class="btn btn-primary wide" id="pay" type="button"${state.cart.length?"":" disabled"}>${state.payMethod==="On credit"?"Complete credit sale":"Complete sale"}</button></section>
   <h2>Recent sales</h2>
   <p class="hint">Edit a price to correct a sale. The total updates.</p>
-  <section class="card list">${state.sales.length?state.sales.map(s=>`<div class="sale"><div class="entry"><b>Sale #${s.id}, ${money(s.total)}</b>${saleBadge(s)}</div>${s.lines.map((l,i)=>`<div class="line"><label for="sp${s.id}-${i}">${l.qty} × ${esc(l.name)}, price each</label><input id="sp${s.id}-${i}" class="price" type="number" min="0" inputmode="decimal" value="${l.price}" data-sprice="${s.id}:${i}"></div>`).join("")}<small class="meta">${s.debt?"On credit to "+esc(s.debt.customer)+(saleOwed(s)>0?", owes "+money(saleOwed(s)):", fully paid"):"Paid by "+esc(s.method)}</small></div>`).join(""):`<div class="empty">No sales yet.</div>`}</section>`;
+  <section class="card list">${state.sales.length?state.sales.map(s=>`<div class="sale"><div class="entry"><b>Sale #${s.id}, ${money(s.total)}</b>${saleBadge(s)}</div>${s.lines.map((l,i)=>`<div class="line"><label for="sp${s.id}-${i}">${l.qty} × ${esc(l.name)}, price each</label><input id="sp${s.id}-${i}" class="price" type="number" min="0" inputmode="decimal" value="${l.price}" data-sprice="${s.id}:${i}"></div>`).join("")}<small class="meta">${s.debt?"On credit to "+esc(s.debt.customer)+(saleOwed(s)>0?", owes "+money(saleOwed(s)):", fully paid"):"Paid by "+esc(s.method)}</small>${datedNote(s)}</div>`).join(""):`<div class="empty">No sales yet.</div>`}</section>`;
 }
 let DL=null;
 if(window.claude&&window.claude.use)window.claude.use("downloads").then(d=>{DL=d;if(state.view==="rcpt"&&state.rcpt)render();}).catch(()=>{});
@@ -347,17 +379,19 @@ function rcpt(){
    ${f.showChange&&s.paid!=null?`<div class="rl"><span>Cash received</span><span>${money(s.paid)}</span></div><div class="rl"><span>Change</span><span>${money(s.change)}</span></div>`:""}
    ${f.showCashier&&s.cashier?`<div class="rl"><span>Served by</span><span>${esc(s.cashier)}</span></div>`:""}
    ${f.footer?`<p class="c">${esc(f.footer)}</p>`:""}</section>
+   ${s.dated?`<p class="msg">Date changed by ${esc(s.datedBy||"a worker")}. Entered on ${esc(s.entered||"")}.</p>`:""}
    <div class="acts"><button class="btn btn-secondary" id="rback" type="button">Back to receipts</button><button class="btn btn-secondary" id="rprint" type="button">Print receipt</button>${DL?`<button class="btn btn-primary" id="rsave" type="button">Save receipt</button>`:""}${isAdmin()?`<button class="btn btn-danger" data-rdelask="1" type="button">Delete this receipt\u2026</button>`:""}</div>
    ${isAdmin()&&state.rdelAsk?`<div class="dangerbox" role="alertdialog" aria-label="Confirm delete receipt"><p><b>This cannot be undone.</b> Receipt #${s.id} (${money(s.total)}) will be deleted for good, and sales totals will drop to match. The stock is not put back.</p><label for="rdelpin">Enter your PIN to confirm</label><input id="rdelpin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="4-digit PIN">${state.rdelErr?`<p class="lerr" role="alert" style="display:block;margin:6px 0 0">${esc(state.rdelErr)}</p>`:""}<div class="acts left" style="padding-left:0;margin-top:10px"><button class="btn btn-danger" data-rdelgo="${s.id}" type="button">Delete permanently</button><button class="btn btn-secondary" data-rdelcancel="1" type="button">Cancel</button></div></div>`:""}`;
   const nd=state.sales.filter(x=>saleOwed(x)>0).length,rt=state.rcptTab==="debts"?"debts":"all";
   const tabs=`<div class="tabs" role="tablist">${[["all","All receipts"],["debts","Debts"+(nd?" ("+nd+")":"")]].map(([k,l])=>`<button class="btn ${rt===k?"btn-primary":"btn-secondary"}" role="tab" aria-selected="${rt===k}" data-rt="${k}" type="button">${l}</button>`).join("")}</div>`;
   if(rt==="debts")return `<h1>Receipts</h1>${msg()}${tabs}${debtsTab()}`;
-  return `<h1>Receipts</h1>${msg()}${tabs}<section class="card list">${state.sales.length?state.sales.map(s=>`<div class="entry"><div><b>Receipt #${s.id}, ${money(s.total)}</b><small>${esc(s.time)}, ${esc(s.method)}</small></div><div>${saleBadge(s)} <button class="btn btn-secondary btn-sm" data-rview="${s.id}" type="button">View</button></div></div>`).join(""):`<div class="empty">No receipts yet. Complete a sale in POS to create one.</div>`}</section>`;
+  return `<h1>Receipts</h1>${msg()}${tabs}<section class="card list">${state.sales.length?state.sales.map(s=>`<div class="entry"><div><b>Receipt #${s.id}, ${money(s.total)}</b><small>${esc(s.time)}, ${esc(s.method)}${s.dated?", date changed by "+esc(s.datedBy||"a worker"):""}</small></div><div>${saleBadge(s)} <button class="btn btn-secondary btn-sm" data-rview="${s.id}" type="button">View</button></div></div>`).join(""):`<div class="empty">No receipts yet. Complete a sale in POS to create one.</div>`}</section>`;
 }
 const VIEWS={dash:"Dashboard",inv:"Inventory",pos:"POS",rcpt:"Receipts",rx:"Prescriptions",team:"Team",facility:"Facility"};
 const ROLES={Cashier:["pos","rcpt"],Pharmacist:["dash","inv","rx","rcpt"],"Stock clerk":["inv"],Admin:Object.keys(VIEWS)};
 /* remembered choices: the add-worker form and the edit panel keep the role and access ticks across redraws */
 state.wf={role:"Cashier",acc:[...ROLES.Cashier]};state.wedit=null;state.wef=null;
+state.saleDate=null;state.calOpen=false;state.calM=null; /* POS: chosen sale date (YYYY-MM-DD) or null for today */
 const allowed=v=>{const w=state.team.find(x=>x.id===(state.as||state.user));return !!w&&w.access.includes(v);};
 function banner(){const w=state.team.find(x=>x.id===state.as);return `<div class="msg" role="status">Previewing as ${esc(w.name)} (${esc(w.role)}). <button class="btn btn-secondary btn-sm" id="exitprev" type="button">Exit preview</button></div>`;}
 function home(){
@@ -665,7 +699,7 @@ function workersTab(){
   return `
   <div class="stats3"><div class="card stat"><b>${state.team.length} of ${state.slots}</b><span>Slots in use</span></div><div class="card stat"><b>${free.length}</b><span>Slots free</span></div></div>
   <section class="card panel"><h2>Add a worker</h2>
-   <label for="wn">Full name</label><input id="wn" autocomplete="off" placeholder="e.g. Macro Trades">
+   <label for="wn">Full name</label><input id="wn" autocomplete="off" placeholder="e.g. Grace Namuli">
    <label for="wpin">PIN (4 digits)</label><input id="wpin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password" placeholder="4-digit PIN">
    <label for="wrole" class="gap">Role</label><select id="wrole">${Object.keys(ROLES).map(r=>`<option${state.wf.role===r?" selected":""}>${r}</option>`).join("")}</select>
    <fieldset class="acc"><legend>What this worker can access</legend>${Object.keys(VIEWS).map(k=>`<label class="chk"><input type="checkbox" data-acc="${k}"${state.wf.acc.includes(k)?" checked":""}> ${VIEWS[k]}</label>`).join("")}</fieldset>
@@ -763,6 +797,8 @@ document.getElementById("main").addEventListener("input",e=>{const i=e.target.id
     l.qty=Math.min(n,mx);cartLive();
   }
 });
+document.addEventListener("click",e=>{if(state.calOpen&&!e.target.closest(".daterow")){state.calOpen=false;if(state.view==="pos")render();}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&state.calOpen){state.calOpen=false;if(state.view==="pos")render();}});
 document.getElementById("main").addEventListener("keydown",e=>{if(e.target.dataset&&e.target.dataset.cqty&&["e","E","+","-",".",","].includes(e.key))e.preventDefault();});
 document.getElementById("main").addEventListener("click",e=>{
   const t=e.target.closest("button");if(!t)return;
@@ -837,23 +873,32 @@ document.getElementById("main").addEventListener("click",e=>{
     if(t.dataset.cinc){if(inCart<tot){l.qty++;state.msg=null;}else state.msg={t:"Only "+tot+" of "+l.name+" in stock.",err:1};}
     else{l.qty--;if(l.qty<1)state.cart=state.cart.filter(x=>x!==l);state.msg=null;}
     render();
+  }else if(t.id==="calbtn"){state.calOpen=!state.calOpen;state.calM=null;render();
+  }else if(t.dataset.calnav){
+    const sel=saleDay()||new Date(),cm=state.calM||{y:sel.getFullYear(),m:sel.getMonth()},d=new Date(cm.y,cm.m+(+t.dataset.calnav),1),n=new Date();
+    if(d>new Date(n.getFullYear(),n.getMonth(),1))return;
+    state.calM={y:d.getFullYear(),m:d.getMonth()};render();
+  }else if(t.dataset.cald){state.saleDate=t.dataset.cald;if(!saleDay())state.saleDate=null;state.calOpen=false;state.calM=null;render();
+  }else if(t.id==="caltoday"||t.id==="calreset"){state.saleDate=null;state.calOpen=false;state.calM=null;render();
   }else if(t.id==="pay"){
     const need={};state.cart.forEach(l=>{const k=keyOf(l.name);need[k]=(need[k]||0)+l.qty;});
     const bad=state.cart.find(l=>sellable(l.name)<need[keyOf(l.name)]);
     if(bad){state.msg={t:"Not enough "+bad.name+" in stock for this sale.",err:1};return render();}
     const total=state.cart.reduce((a,l)=>a+l.qty*l.price,0);
-    const method=pm.value,prEl=document.getElementById("pr"),raw=method==="Cash"&&prEl?prEl.value.trim():"";let paid=null,change=null,debt=null;
+    const stamp=saleStamp(),method=pm.value,prEl=document.getElementById("pr"),raw=method==="Cash"&&prEl?prEl.value.trim():"";let paid=null,change=null,debt=null;
     if(method==="On credit"){
       const c=state.cust,nm=c.name.trim(),dep=c.dep===""?0:+c.dep;
       if(!nm){state.msg={t:"Enter the customer\u2019s name for a sale on credit.",err:1};return render();}
       if(isNaN(dep)||dep<0||dep>=total){state.msg={t:dep>=total&&total>0?"Paid now must be less than the total. For a full payment use Cash, Mobile money or Card.":"Enter a valid amount for Paid now, or leave it empty.",err:1};return render();}
       const known=debtors().get(keyOf(nm));
-      debt={customer:known?known.name:nm,phone:c.phone.trim()||(known?known.phone:""),due:c.due,pays:dep>0?[{amt:dep,method:c.depm,time:new Date().toLocaleString("en-GB"),ts:Date.now(),by:(state.team.find(w=>w.id===state.user)||{}).name||""}]:[]};
+      debt={customer:known?known.name:nm,phone:c.phone.trim()||(known?known.phone:""),due:c.due,pays:dep>0?[{amt:dep,method:c.depm,time:stamp.time,ts:stamp.ts,by:(state.team.find(w=>w.id===state.user)||{}).name||""}]:[]};
     }else
     if(raw!==""){paid=+raw;state.received=raw;if(!(paid>=total)){state.msg={t:"Cash received is less than the total of "+money(total)+".",err:1};return render();}change=paid-total;}
     const costs=state.cart.map(l=>deduct(l.name,l.qty)); /* nearest expiry batch first; keeps what the stock cost us */
     const me=state.team.find(w=>w.id===state.user);
-    state.sales.unshift({id:state.nextSale++,total,method,time:new Date().toLocaleString("en-GB"),ts:Date.now(),cashier:me?me.name:"",paid,change,debt,lines:state.cart.map((l,i)=>({name:l.name,qty:l.qty,price:l.price,cost:costs[i]/l.qty}))});
+    const sale={id:state.nextSale++,total,method,time:stamp.time,ts:stamp.ts,cashier:me?me.name:"",paid,change,debt,lines:state.cart.map((l,i)=>({name:l.name,qty:l.qty,price:l.price,cost:costs[i]/l.qty}))};
+    if(stamp.changed){sale.dated=true;sale.datedBy=me?me.name:"";sale.entered=new Date().toLocaleString("en-GB");}
+    state.sales.unshift(sale);state.saleDate=null;state.calOpen=false;state.calM=null;
     const dn=debt?debt.customer:"";
     state.cart=[];state.received="";if(debt)state.cust={name:"",phone:"",dep:"",depm:"Cash",due:""};
     state.msg={t:debt?"Credit sale recorded: "+dn+" owes "+money(total-salePaid(state.sales[0]))+". See Receipts, then Debts.":"Sale complete: "+money(total)+" paid by "+method+"."+(change!=null?" Change to give: "+money(change)+".":"")};render();
@@ -1109,6 +1154,7 @@ const storeAdapter={
 document.addEventListener("focusout",()=>{if(storeDirty)setTimeout(()=>{if(storeDirty&&state.user&&!typingNow()){storeDirty=false;render();}},60);});
 async function onSignedIn(w,first){
   if(cloud){try{await cloud.openStore(storeAdapter);}catch(e){try{await cloud.logout();}catch(_){}throw e;}}
+  state.saleDate=null;state.calOpen=false;state.calM=null;
   state.fails=0;state.user=w.id;state.as=null;state.msg=null;state.rcpt=null;state.draft=null;state.cart=[];
   state.team=[w];
   if(unsubTeam){unsubTeam();unsubTeam=null;}
