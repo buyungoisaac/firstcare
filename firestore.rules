@@ -6,7 +6,7 @@ service cloud.firestore {
     function worker() { return get(/databases/$(database)/documents/workers/$(request.auth.uid)).data; }
     function isWorker() { return signedIn() && exists(/databases/$(database)/documents/workers/$(request.auth.uid)); }
     function isAdmin() { return isWorker() && worker().role == 'Admin'; }
-    // true for administrators, and for workers who were given that area (dash, inv, pos, rcpt, rx, team, facility)
+    // true for administrators, and for workers who were given that area (dash, inv, pos, rcpt, ledger, rx, team, facility)
     function can(area) { return isWorker() && (worker().role == 'Admin' || (worker().access is list && area in worker().access)); }
     function setupDone() { return exists(/databases/$(database)/documents/meta/setup); }
 
@@ -65,10 +65,10 @@ service cloud.firestore {
       allow delete: if can('inv');
     }
 
-    // Receipts. The till records them, Receipts takes credit payments, only administrators delete them.
+    // Receipts. The till records them, Receipts and the Ledger take credit payments, only administrators delete them.
     match /sales/{id} {
       allow read: if isWorker();
-      allow create, update: if (can('pos') || can('rcpt')) && request.resource.data.total is number;
+      allow create, update: if (can('pos') || can('rcpt') || can('ledger')) && request.resource.data.total is number;
       allow delete: if isAdmin();
     }
 

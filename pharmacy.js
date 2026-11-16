@@ -76,10 +76,26 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"
 const money=n=>"UGX "+Math.round(n).toLocaleString("en-US");
 const badge=(cls,icon,text)=>`<span class="badge s-${cls}"><span aria-hidden="true">${icon}</span>${text}</span>`;
 /* credit sales: a sale with .debt is on credit. Money paid so far = sum of its payments. */
-const salePaid=s=>s.debt?s.debt.pays.reduce((a,p)=>a+p.amt,0):s.total;
+/* Ledger: each customer (matched by name) has one ledger. Everything they took on credit is added up, everything they paid is added up,
+   and the payments are used on their oldest receipts first. So paying more than owed leaves a credit balance for their next purchase. */
+let LED=null; /* cache, cleared on every redraw and whenever a sale or payment changes */
+function ledgers(){
+  if(LED)return LED;
+  const m=new Map(),ap=new Map();
+  [...state.sales].filter(x=>x.debt).sort((a,b)=>a.ts-b.ts||a.id-b.id).forEach(x=>{
+    const k=keyOf(x.debt.customer),L=m.get(k)||{key:k,name:x.debt.customer,phone:"",taken:0,paid:0,sales:[],pays:[]};
+    L.name=x.debt.customer;if(x.debt.phone)L.phone=x.debt.phone;L.taken+=x.total;L.sales.push(x);
+    x.debt.pays.forEach(p=>{L.paid+=p.amt;L.pays.push({amt:p.amt,method:p.method,time:p.time,ts:p.ts||0,by:p.by||"",rcpt:x.id});});
+    m.set(k,L);});
+  m.forEach(L=>{L.pays.sort((a,b)=>a.ts-b.ts);L.bal=L.taken-L.paid;let pool=L.paid;L.sales.forEach(x=>{const a=Math.min(x.total,Math.max(0,pool));pool-=a;ap.set(x.id,a);});});
+  return LED={byKey:m,ap};
+}
+const salePaid=s=>s.debt?(ledgers().ap.get(s.id)||0):s.total;
+const saleCash=s=>s.debt?s.debt.pays.reduce((a,p)=>a+p.amt,0):s.total; /* money really received for this sale */
 const saleOwed=s=>s.debt?Math.max(0,s.total-salePaid(s)):0;
 const saleCost=s=>s.lines.reduce((a,l)=>a+l.qty*(l.cost||0),0);
 const owedTotal=()=>state.sales.reduce((a,s)=>a+saleOwed(s),0);
+const prepaidTotal=()=>[...ledgers().byKey.values()].reduce((a,L)=>a+Math.max(0,-L.bal),0); /* credit balances: money customers paid ahead */
 const saleBadge=s=>!s.debt?badge("success","&#10003;","Paid"):saleOwed(s)<=0?badge("success","&#10003;","Paid (was credit)"):salePaid(s)>0?badge("warning","&#9888;","Part paid"):badge("danger","&#9888;","On credit");
 const rrow=(a,b,doc)=>doc?`<tr><td>${a}</td><td class="r">${b}</td></tr>`:`<div class="rl"><span>${a}</span><span>${b}</span></div>`;
 function payRows(s,doc){
@@ -95,6 +111,7 @@ const ICON=k=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke
 dash:'<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
 inv:'<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>',
 pos:'<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.5 12h11l2-8H6"/>',
+ledger:'<path d="M5 3h12a2 2 0 0 1 2 2v16H7a2 2 0 0 1-2-2z"/><path d="M5 19a2 2 0 0 1 2-2h12M9 7h6M9 11h6"/>',
 rcpt:'<path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/>',
 rx:'<rect x="5" y="4" width="14" height="18" rx="2"/><path d="M9 2h6v4H9zM12 10v6M9 13h6"/>',
 team:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.8 0 4.5 1.8 4.5 4.5"/>',
@@ -264,7 +281,7 @@ function prows(){
   const q=state.pq.trim().toLowerCase();
   if(!q)return "";
   const r=products().filter(n=>n.toLowerCase().includes(q)&&sellable(n)>0).sort((x,y)=>(y.toLowerCase().startsWith(q)-x.toLowerCase().startsWith(q))||(x.toLowerCase()<y.toLowerCase()?-1:1)).slice(0,8);
-  return r.length?r.map(n=>{const b=batches(n);return `<button type="button" role="option" data-cadd="${esc(n)}"><span><b>${esc(n)}</b><small>${sellable(n)} in stock, sells first: expires ${b[0].exp}${b.length>1?" ("+b.length+" batches)":""}</small></span><span>${money(b[0].sell)}</span></button>`;}).join(""):`<div class="ddnone">No product in stock matches &ldquo;${esc(state.pq.trim())}&rdquo;</div>`;
+  return r.length?r.map(n=>{const b=batches(n);return `<button type="button" role="option" data-csel="${esc(n)}"><span><b>${esc(n)}</b><small>${sellable(n)} in stock, sells first: expires ${b[0].exp}${b.length>1?" ("+b.length+" batches)":""}</small></span><span>${money(b[0].sell)}</span></button>`;}).join(""):`<div class="ddnone">No product in stock matches &ldquo;${esc(state.pq.trim())}&rdquo;</div>`;
 }
 /* update cart numbers in place so a click on "Complete sale" is not lost to a re-render */
 /* most of this product that can still go on this cart line */
@@ -286,15 +303,11 @@ function chgText(){
   return +r>=total?"Change to give: "+money(+r-total):"Short by "+money(total-+r);
 }
 const PAYM=["Cash","Mobile money","Card","On credit"];
-function debtors(){
-  const m=new Map();
-  state.sales.forEach(x=>{const o=saleOwed(x);if(o<=0)return;const k=keyOf(x.debt.customer),d=m.get(k)||{name:x.debt.customer,phone:"",owed:0,n:0};
-    d.owed+=o;d.n++;if(!d.phone&&x.debt.phone)d.phone=x.debt.phone;m.set(k,d);});
-  return m;
-}
+const debtors=()=>ledgers().byKey; /* every customer who has a ledger */
+const balText=L=>L.bal>0?"owes "+money(L.bal):L.bal<0?"has "+money(-L.bal)+" credit":"paid up";
 function custNote(){
   const d=debtors().get(keyOf(state.cust.name));
-  return d?d.name+" still owes "+money(d.owed)+" ("+d.n+" sale"+(d.n===1?"":"s")+"). This sale is added to the same customer.":"";
+  return d?d.name+" "+balText(d)+" ("+d.sales.length+" credit sale"+(d.sales.length===1?"":"s")+"). This sale is added to the same ledger.":"";
 }
 function credText(){
   const total=state.cart.reduce((a,l)=>a+l.qty*l.price,0),d=state.cust.dep;
@@ -303,8 +316,8 @@ function credText(){
 }
 function creditForm(){
   const c=state.cust;
-  return `<div class="creditbox"><p class="hint" style="margin:0 0 6px"><b>Sale on credit.</b> The customer takes the products now and pays later. It is listed in Receipts, then Debts, until it is fully paid.</p>
-   <label for="cn">Customer name</label><div class="combo"><input id="cn" role="combobox" aria-expanded="false" aria-controls="cdd" autocomplete="off" maxlength="60" placeholder="Search a customer who owes, or type a new name" value="${esc(c.name)}"><div id="cdd" class="dd" role="listbox" hidden></div></div>
+  return `<div class="creditbox"><p class="hint" style="margin:0 0 6px"><b>Sale on credit.</b> The customer takes the products now and pays later. It is written on the customer\u2019s ledger. See the Ledger tab.</p>
+   <label for="cn">Customer name</label><div class="combo"><input id="cn" role="combobox" aria-expanded="false" aria-controls="cdd" autocomplete="off" maxlength="60" placeholder="Search a customer with a ledger, or type a new name" value="${esc(c.name)}"><div id="cdd" class="dd" role="listbox" hidden></div></div>
    <p class="hint" id="cnote" role="status" style="margin:6px 4px 0">${esc(custNote())}</p>
    <label for="cph" class="gap">Customer phone (optional)</label><input id="cph" inputmode="tel" autocomplete="off" maxlength="30" placeholder="e.g. 0700 000 000" value="${esc(c.phone)}">
    <div class="grid2" style="margin-top:12px"><div><label for="cd">Paid now (optional)</label><input id="cd" type="number" min="0" inputmode="decimal" placeholder="0" value="${esc(c.dep)}"></div><div><label for="cdm">Paid now by</label><select id="cdm">${["Cash","Mobile money","Card"].map(o=>`<option${o===c.depm?" selected":""}>${o}</option>`).join("")}</select></div></div>
@@ -342,10 +355,25 @@ function dateRow(){
   return `<div class="daterow"><span class="lbl">Sale date</span>${day?`<button type="button" class="plink" id="calreset">Back to today</button>`:""}<button type="button" id="calbtn" class="btn btn-sm datebtn${day?" changed":" btn-secondary"}" aria-haspopup="dialog" aria-expanded="${state.calOpen?"true":"false"}">${CAL_ICON} ${day?fdate(day):"Today"}</button>${state.calOpen?calendarHtml():""}</div>`;
 }
 const datedNote=s=>s.dated?`<small class="meta">Date changed by ${esc(s.datedBy||"a worker")}. Entered on ${esc(s.entered||"")}.</small>`:"";
+const inCartOf=n=>state.cart.filter(x=>keyOf(x.name)===keyOf(n)).reduce((a,x)=>a+x.qty,0);
+const selTotal=()=>{const q=Math.floor(+state.sel.qty),p=+state.sel.price;return (isNaN(q)||isNaN(p)||q<1||p<0?0:q*p).toLocaleString("en-US");};
+function selPanel(){
+  const sl=state.sel;if(!sl)return "";
+  const n=sl.name,tot=sellable(n);
+  if(!tot){state.sel=null;return "";}
+  const av=tot-inCartOf(n),b=batches(n)[0];
+  return `<section class="card selbox" aria-label="Add ${esc(n)} to the cart"><div class="sr">
+   <div class="prod"><div class="pn"><b>${esc(n)}</b><small>Expires ${esc(b.exp)}</small></div><button type="button" class="x" id="selx" aria-label="Clear the selected product">&times;</button></div>
+   <div class="f p"><label for="selp">Price</label><input id="selp" type="number" min="0" inputmode="decimal" value="${esc(String(sl.price))}"></div>
+   <div class="f q"><label for="selq">Quantity</label><div class="st"><button type="button" id="selminus" aria-label="One less">&minus;</button><input id="selq" type="number" min="1" max="${av}" step="1" inputmode="numeric" value="${esc(String(sl.qty))}"><button type="button" id="selplus" aria-label="One more">+</button></div><small id="selav">${av} available</small></div>
+   <div class="f t"><label>Total</label><b id="selt">${selTotal()}</b></div>
+   <button type="button" class="add" id="seladd" aria-label="Add to cart">&#8853; ADD</button></div></section>`;
+}
 function pos(){
   const total=state.cart.reduce((a,l)=>a+l.qty*l.price,0);
   return `<h1>Point of sale</h1>${msg()}
   <section class="card panel"><div class="combo"><input class="pill" id="psearch" role="combobox" aria-expanded="false" aria-controls="pdd" type="search" aria-label="Search products" placeholder="Search products to add to the sale…" value="${esc(state.pq)}" autocomplete="off"><div id="pdd" class="dd" role="listbox" hidden></div></div></section>
+  ${selPanel()}
   <section class="card panel"><h2>Cart</h2>
   ${state.cart.length?state.cart.map(l=>{const m={name:l.name},mx=lineMax(l);return `<div class="entry"><div><b>${esc(m.name)}</b><span class="line2"><label for="cp${l.uid}">Price each</label><input id="cp${l.uid}" class="price" type="number" min="0" inputmode="decimal" value="${l.price}" data-cprice="${l.uid}"></span><small>Subtotal ${money(l.qty*l.price)}</small><small class="maxnote" id="mx${l.uid}" role="status">${l.qty>=mx?"Only "+sellable(l.name)+" in stock":""}</small></div><div class="qty"><button class="btn btn-secondary btn-sm" data-cdec="${l.uid}" type="button" aria-label="Remove one ${esc(m.name)}">&minus;</button><input class="qtyin${l.qty>=mx?" atmax":""}" id="cq${l.uid}" type="number" min="0" max="${mx}" step="1" inputmode="numeric" value="${l.qty}" data-cqty="${l.uid}" aria-label="Quantity of ${esc(m.name)}"><button class="btn btn-secondary btn-sm" data-cinc="${l.uid}" type="button"${l.qty>=mx?" disabled":""} aria-label="Add one ${esc(m.name)}">+</button></div></div>`}).join(""):`<div class="empty">Cart is empty. Add a product to start a sale.</div>`}
   <div class="total"><span>Total</span><b>${money(total)}</b></div>
@@ -382,23 +410,20 @@ function rcpt(){
    ${s.dated?`<p class="msg">Date changed by ${esc(s.datedBy||"a worker")}. Entered on ${esc(s.entered||"")}.</p>`:""}
    <div class="acts"><button class="btn btn-secondary" id="rback" type="button">Back to receipts</button><button class="btn btn-secondary" id="rprint" type="button">Print receipt</button>${DL?`<button class="btn btn-primary" id="rsave" type="button">Save receipt</button>`:""}${isAdmin()?`<button class="btn btn-danger" data-rdelask="1" type="button">Delete this receipt\u2026</button>`:""}</div>
    ${isAdmin()&&state.rdelAsk?`<div class="dangerbox" role="alertdialog" aria-label="Confirm delete receipt"><p><b>This cannot be undone.</b> Receipt #${s.id} (${money(s.total)}) will be deleted for good, and sales totals will drop to match. The stock is not put back.</p><label for="rdelpin">Enter your PIN to confirm</label><input id="rdelpin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="4-digit PIN">${state.rdelErr?`<p class="lerr" role="alert" style="display:block;margin:6px 0 0">${esc(state.rdelErr)}</p>`:""}<div class="acts left" style="padding-left:0;margin-top:10px"><button class="btn btn-danger" data-rdelgo="${s.id}" type="button">Delete permanently</button><button class="btn btn-secondary" data-rdelcancel="1" type="button">Cancel</button></div></div>`:""}`;
-  const nd=state.sales.filter(x=>saleOwed(x)>0).length,rt=state.rcptTab==="debts"?"debts":"all";
-  const tabs=`<div class="tabs" role="tablist">${[["all","All receipts"],["debts","Debts"+(nd?" ("+nd+")":"")]].map(([k,l])=>`<button class="btn ${rt===k?"btn-primary":"btn-secondary"}" role="tab" aria-selected="${rt===k}" data-rt="${k}" type="button">${l}</button>`).join("")}</div>`;
-  if(rt==="debts")return `<h1>Receipts</h1>${msg()}${tabs}${debtsTab()}`;
-  return `<h1>Receipts</h1>${msg()}${tabs}<section class="card list">${state.sales.length?state.sales.map(s=>`<div class="entry"><div><b>Receipt #${s.id}, ${money(s.total)}</b><small>${esc(s.time)}, ${esc(s.method)}${s.dated?", date changed by "+esc(s.datedBy||"a worker"):""}</small></div><div>${saleBadge(s)} <button class="btn btn-secondary btn-sm" data-rview="${s.id}" type="button">View</button></div></div>`).join(""):`<div class="empty">No receipts yet. Complete a sale in POS to create one.</div>`}</section>`;
+  return `<h1>Receipts</h1>${msg()}<section class="card list">${state.sales.length?state.sales.map(s=>`<div class="entry"><div><b>Receipt #${s.id}, ${money(s.total)}</b><small>${esc(s.time)}, ${esc(s.method)}${s.dated?", date changed by "+esc(s.datedBy||"a worker"):""}</small></div><div>${saleBadge(s)} <button class="btn btn-secondary btn-sm" data-rview="${s.id}" type="button">View</button></div></div>`).join(""):`<div class="empty">No receipts yet. Complete a sale in POS to create one.</div>`}</section>`;
 }
-const VIEWS={dash:"Dashboard",inv:"Inventory",pos:"POS",rcpt:"Receipts",rx:"Prescriptions",team:"Team",facility:"Facility"};
-const ROLES={Cashier:["pos","rcpt"],Pharmacist:["dash","inv","rx","rcpt"],"Stock clerk":["inv"],Admin:Object.keys(VIEWS)};
+const VIEWS={dash:"Dashboard",inv:"Inventory",pos:"POS",rcpt:"Receipts",ledger:"Ledger",rx:"Prescriptions",team:"Team",facility:"Facility"};
+const ROLES={Cashier:["pos","rcpt","ledger"],Pharmacist:["dash","inv","rx","rcpt","ledger"],"Stock clerk":["inv"],Admin:Object.keys(VIEWS)};
 /* remembered choices: the add-worker form and the edit panel keep the role and access ticks across redraws */
 state.wf={role:"Cashier",acc:[...ROLES.Cashier]};state.wedit=null;state.wef=null;
+state.sel=null; /* POS: product picked from the search, waiting for price and quantity: {name,qty,price} */
+state.ledCust=null;state.ledQ=""; /* Ledger: open customer and search text */
 state.saleDate=null;state.calOpen=false;state.calM=null; /* POS: chosen sale date (YYYY-MM-DD) or null for today */
-const allowed=v=>{const w=state.team.find(x=>x.id===(state.as||state.user));return !!w&&w.access.includes(v);};
+const allowed=v=>{const w=state.team.find(x=>x.id===(state.as||state.user));return !!w&&(w.role==="Admin"||w.access.includes(v));};
 function banner(){const w=state.team.find(x=>x.id===state.as);return `<div class="msg" role="status">Previewing as ${esc(w.name)} (${esc(w.role)}). <button class="btn btn-secondary btn-sm" id="exitprev" type="button">Exit preview</button></div>`;}
 function home(){
   const tiles=Object.keys(VIEWS).filter(allowed).map(k=>`<button class="tile" data-go="${k}" type="button"><span class="tic" aria-hidden="true">${ICON(k)}</span><span>${VIEWS[k]}</span></button>`).join("");
-  const nd=state.sales.filter(x=>saleOwed(x)>0).length;
-  const debtTile=allowed("rcpt")?`<button class="tile" data-godebts="1" type="button" aria-label="Debts${nd?", "+nd+" owing":""}"><span class="tic" aria-hidden="true">${ICON("debt")}${nd?`<span class="tbadge">${nd}</span>`:""}</span><span>Debts</span>${nd?`<small class="tsub">${money(owedTotal())} owed</small>`:""}</button>`:"";
-  return `<h1>Home</h1>${msg()}<div class="home">${tiles}${debtTile}</div>`;
+  return `<h1>Home</h1>${msg()}<div class="home">${tiles}</div>`;
 }
 function facility(){
   const tab=state.facTab==="balance"?"balance":"details";
@@ -406,11 +431,11 @@ function facility(){
 }
 function bsRow(label,val,o){o=o||{};return `<div class="bsr${o.t?" t":""}"><span>${label}${o.note?`<small>${o.note}</small>`:""}</span><b${val<0?' class="neg"':""}>${money(val)}</b></div>`;}
 function balanceTab(){
-  const S=state.sales,sales=S.reduce((a,x)=>a+x.total,0),collected=S.reduce((a,x)=>a+salePaid(x),0),owed=owedTotal(),cogs=S.reduce((a,x)=>a+saleCost(x),0);
+  const S=state.sales,sales=S.reduce((a,x)=>a+x.total,0),collected=S.reduce((a,x)=>a+saleCash(x),0),owed=owedTotal(),cogs=S.reduce((a,x)=>a+saleCost(x),0);
   const exp=state.expenses.reduce((a,e)=>a+e.amt,0),rxc=state.rxCost,gross=sales-cogs,net=gross-exp-rxc;
   const cash=collected-exp,invGood=state.meds.filter(m=>m.exp>TODAY).reduce((a,m)=>a+m.qty*m.cost,0),invExp=state.meds.filter(m=>m.exp<=TODAY).reduce((a,m)=>a+m.qty*m.cost,0),inv=invGood+invExp;
   const retail=state.meds.filter(m=>m.exp>TODAY).reduce((a,m)=>a+m.qty*m.sell,0);
-  const assets=cash+owed+inv,cap=assets-net,credit=S.filter(x=>x.debt).reduce((a,x)=>a+x.total,0);
+  const prepaid=prepaidTotal(),assets=cash+owed+inv,cap=assets-prepaid-net,credit=S.filter(x=>x.debt).reduce((a,x)=>a+x.total,0);
   const byCat={};state.expenses.forEach(e=>{byCat[e.cat]=(byCat[e.cat]||0)+e.amt;});
   const exs=[...state.expenses].sort((a,b)=>a.date<b.date?1:a.date>b.date?-1:b.id-a.id);
   return `<p class="hint" style="margin-top:0">Everything to date: all sales, the stock on the shelves and the money spent. Stock is valued at what it cost you.</p>
@@ -418,7 +443,7 @@ function balanceTab(){
    ${bsRow("Money received",collected,{note:S.length+" sale"+(S.length===1?"":"s")+", "+money(sales)+" sold"+(credit?", "+money(credit)+" of it on credit":"")})}
    ${bsRow("Less expenses paid",-exp,{note:state.expenses.length+" expense"+(state.expenses.length===1?"":"s")})}
    ${bsRow("Cash, mobile money and card in hand",cash,{t:1})}
-   ${bsRow("Owed by customers",owed,{note:"Credit sales not yet paid. See Receipts, then Debts."})}
+   ${bsRow("Owed by customers",owed,{note:"Credit sales not yet paid. See Ledger."})}
    ${bsRow("Stock that can be sold, at cost",invGood,{note:"Worth "+money(retail)+" at selling prices"})}
    ${bsRow("Expired stock, at cost",invExp,{note:"Cannot be sold"})}
    ${bsRow("Total assets",assets,{t:1})}
@@ -430,9 +455,10 @@ function balanceTab(){
    ${bsRow("Less expenses",-exp)}
    ${rxc?bsRow("Less medicine given out on prescription",-rxc,{note:"At cost. Prescriptions are not billed in this app."}):""}
    ${bsRow("Net profit",net,{t:1})}
+   ${prepaid>0?bsRow("Owed to customers",prepaid,{note:"Credit balances: customers who paid more than they owed. See Ledger."}):""}
    ${bsRow("Stock and capital put in",cap,{note:"Balancing figure: your opening stock and any stock or money added"})}
-   ${bsRow("Total liabilities and equity",cap+net,{t:1})}
-   <p class="hint" role="status" style="margin-bottom:0">${Math.round(assets)===Math.round(cap+net)?"&#10003; The sheet balances: total assets equal liabilities plus equity. No supplier debts are tracked, so liabilities are zero.":"The sheet does not balance."}</p>
+   ${bsRow("Total liabilities and equity",prepaid+cap+net,{t:1})}
+   <p class="hint" role="status" style="margin-bottom:0">${Math.round(assets)===Math.round(prepaid+cap+net)?"&#10003; The sheet balances: total assets equal liabilities plus equity. No supplier debts are tracked"+(prepaid>0?", so the only liability is the credit balances customers hold.":", so liabilities are zero."):"The sheet does not balance."}</p>
   </section>
   <section class="card panel"><h2>Add an expense</h2>
    <div class="grid2"><div><label for="exd">Date</label><input id="exd" type="date" value="${TODAY}"></div><div><label for="exc">Type</label><select id="exc">${EXCATS.map(c=>`<option>${c}</option>`).join("")}</select></div></div>
@@ -664,28 +690,44 @@ function team(){
   const tab=["theme","import","data"].includes(state.teamTab)?state.teamTab:"workers";
   return `<h1>Team</h1>${msg()}<div class="tabs" role="tablist">${[["workers","Workers"],["theme","Theme"],["import","Import"],["data","Data"]].map(([k,l])=>`<button class="btn ${tab===k?"btn-primary":"btn-secondary"}" role="tab" aria-selected="${tab===k}" data-tt="${k}" type="button">${l}</button>`).join("")}</div>`+(tab==="theme"?themeTab():tab==="import"?importTab():tab==="data"?dataTab():workersTab());
 }
-function payCustomer(key,amt,meth){
-  let left=amt,cleared=0;const by=(state.team.find(w=>w.id===state.user)||{}).name||"";
-  state.sales.filter(x=>x.debt&&saleOwed(x)>0&&keyOf(x.debt.customer)===key).sort((a,b)=>a.ts-b.ts).forEach(x=>{
-    if(left<=0)return;const t=Math.min(saleOwed(x),left);
-    x.debt.pays.push({amt:t,method:meth,time:new Date().toLocaleString("en-GB"),ts:Date.now(),by});left-=t;if(saleOwed(x)<=0)cleared++;});
-  return cleared;
+/* ---- Ledger tab: list of customers, then one customer's two-sided ledger ---- */
+function ledPay(L,amt,meth){ /* a payment is written on the customer's latest credit receipt; the ledger adds it to Money paid */
+  const x=L.sales[L.sales.length-1],by=(state.team.find(w=>w.id===state.user)||{}).name||"";
+  x.debt.pays.push({amt,method:meth,time:new Date().toLocaleString("en-GB"),ts:Date.now(),by});LED=null;
 }
-function debtsTab(){
-  const ds=state.sales.filter(x=>saleOwed(x)>0).sort((a,b)=>keyOf(a.debt.customer)<keyOf(b.debt.customer)?-1:keyOf(a.debt.customer)>keyOf(b.debt.customer)?1:a.ts-b.ts),dm=debtors(),tot=ds.reduce((a,x)=>a+saleOwed(x),0),people=new Set(ds.map(x=>keyOf(x.debt.customer))).size;
-  return `<div class="stats3"><div class="card stat"><b>${money(tot)}</b><span>Total owed</span></div><div class="card stat"><b>${people}</b><span>Customer${people===1?"":"s"} owing</span></div></div>
-  <p class="hint" style="margin-top:0">Customers who took products on credit. When a debt is paid in full it is removed from this list.</p>
-  <section class="card list">${ds.length?ds.map((x,i)=>{const o=saleOwed(x),late=x.debt.due&&x.debt.due<TODAY,ck=keyOf(x.debt.customer),cd=dm.get(ck),first=i===0||keyOf(ds[i-1].debt.customer)!==ck;
-   const custBox=first&&cd.n>1?`<div class="cpbox" data-ckey="${esc(ck)}"><b>Pay all debts for ${esc(cd.name)}</b><small>Owes ${money(cd.owed)} across ${cd.n} sales.</small><div class="grid2" style="margin:10px 0"><div><label>Amount paid</label><input type="number" min="0" inputmode="decimal" placeholder="${cd.owed}" aria-label="Amount paid by ${esc(cd.name)}"></div><div><label>Paid by</label><select aria-label="Payment method">${["Cash","Mobile money","Card"].map(m=>`<option>${m}</option>`).join("")}</select></div></div><div class="acts left" style="padding-left:0"><button class="btn btn-primary btn-sm" data-cpay="1" type="button">Pay this amount</button><button class="btn btn-secondary btn-sm" data-cfull="1" type="button">Pay everything (${money(cd.owed)})</button></div></div>`:"";
-   return custBox+`<div class="sale debt"><div class="entry"><div><b>${esc(x.debt.customer)}</b><small>${x.debt.phone?esc(x.debt.phone)+", ":""}Receipt #${x.id}, ${esc(x.time)}</small>${dm.get(keyOf(x.debt.customer)).n>1?`<small><b>Owes ${money(dm.get(keyOf(x.debt.customer)).owed)} in total</b> (${dm.get(keyOf(x.debt.customer)).n} sales)</small>`:""}</div>${late?badge("danger","&#9888;","Overdue"):badge("warning","&#9888;","Owing")}</div>
-    <div class="line"><span>Items</span><span>${x.lines.map(l=>l.qty+" × "+esc(l.name)).join(", ")}</span></div>
-    <div class="line"><span>Total</span><span>${money(x.total)}</span></div>
-    <div class="line"><span>Paid so far</span><span>${money(salePaid(x))}</span></div>
-    <div class="line"><b>Balance owed</b><b>${money(o)}</b></div>
-    ${x.debt.due?`<div class="line"><span>Promised to pay by</span><span>${esc(x.debt.due)}</span></div>`:""}
-    ${x.debt.pays.map(p=>`<small class="meta">Paid ${money(p.amt)} by ${esc(p.method)}, ${esc(p.time)}</small>`).join("")}
-    <div class="grid2" style="margin:10px 16px 0"><div><label for="dpa${x.id}">Amount paid now</label><input id="dpa${x.id}" type="number" min="0" inputmode="decimal" placeholder="${o}"></div><div><label for="dpm${x.id}">Paid by</label><select id="dpm${x.id}">${["Cash","Mobile money","Card"].map(m=>`<option>${m}</option>`).join("")}</select></div></div>
-    <div class="acts left"><button class="btn btn-primary btn-sm" data-dpay="${x.id}" type="button">Record payment</button><button class="btn btn-secondary btn-sm" data-dfull="${x.id}" type="button">Paid in full (${money(o)})</button><button class="btn btn-secondary btn-sm" data-rview="${x.id}" type="button">View receipt</button></div></div>`;}).join(""):`<div class="empty">No debts. Everyone has paid.</div>`}</section>`;
+const balBadge=L=>L.bal>0?badge("danger","&#9888;","Owes "+money(L.bal)):L.bal<0?badge("success","&#10003;","Credit "+money(-L.bal)):badge("success","&#10003;","Paid up");
+function ledRows(){
+  const q=keyOf(state.ledQ||""),all=[...ledgers().byKey.values()].filter(L=>!q||L.key.includes(q)||(L.phone||"").includes(q)).sort((a,b)=>(b.bal>0)-(a.bal>0)||(a.bal>0&&b.bal>0?b.bal-a.bal:0)||(a.key<b.key?-1:1));
+  return all.length?all.map(L=>`<div class="entry"><div><b>${esc(L.name)}</b><small>${L.phone?esc(L.phone)+", ":""}${L.sales.length} credit sale${L.sales.length===1?"":"s"}</small></div><div>${balBadge(L)} <button class="btn btn-secondary btn-sm" data-led="${esc(L.key)}" type="button">See ledger</button></div></div>`).join(""):`<div class="empty">${state.ledQ?"No customer matches that search.":"No customer has taken products on credit yet. A credit sale in POS opens their ledger here."}</div>`;
+}
+function ledger(){
+  const m=ledgers().byKey,L=state.ledCust?m.get(state.ledCust):null;
+  if(L)return ledgerPage(L);
+  state.ledCust=null;
+  const owing=[...m.values()].filter(x=>x.bal>0).length;
+  return `<h1>Ledger</h1>${msg()}
+  <div class="stats3"><div class="card stat"><b>${money(owedTotal())}</b><span>Total owed</span></div><div class="card stat"><b>${owing}</b><span>Customer${owing===1?"":"s"} owing</span></div></div>
+  <p class="hint" style="margin-top:0">Every customer who took products on credit has a ledger. It stays here after they have paid.</p>
+  <div class="bar"><input id="lsearch" type="search" aria-label="Search customers" placeholder="Search a customer" value="${esc(state.ledQ||"")}" autocomplete="off"></div>
+  <section class="card list" id="lrows">${ledRows()}</section>`;
+}
+function ledgerPage(L){
+  const day=t=>esc(String(t||"").split(",")[0]);
+  const taken=L.sales.map(x=>`<div class="lent"><div class="lh"><span>${day(x.time)} &middot; Receipt #${x.id}</span><b>${money(x.total)}</b></div>${x.lines.map(l=>`<small>${l.qty} &times; ${esc(l.name)} @ ${money(l.price)}</small>`).join("")}</div>`).join("");
+  const paid=L.pays.map(p=>`<div class="lent"><div class="lh"><span>${day(p.time)} &middot; ${esc(p.method)}</span><b>${money(p.amt)}</b></div>${p.by?`<small>Received by ${esc(p.by)}</small>`:""}</div>`).join("");
+  const st=L.bal>0?["Balance owed",money(L.bal),"s-danger"]:L.bal<0?["Credit in "+esc(L.name)+"’s favour",money(-L.bal),"s-success"]:["Balance","Paid up","s-success"];
+  return `<h1>Ledger</h1>${msg()}<div class="acts left" style="padding-left:0"><button class="btn btn-secondary btn-sm" id="ledback" type="button">&larr; All customers</button></div>
+  <section class="card panel"><h2 style="margin-bottom:2px">${esc(L.name)}</h2>${L.phone?`<small class="meta">${esc(L.phone)}</small>`:""}
+   <div class="lbal ${st[2]}"><span>${st[0]}</span><b>${st[1]}</b></div>
+   <label for="lpa">Record a payment (UGX)</label><input id="lpa" type="number" min="0" inputmode="decimal" placeholder="Amount paid">
+   <label for="lpm" class="gap">Paid by</label><select id="lpm">${["Cash","Mobile money","Card"].map(o=>`<option>${o}</option>`).join("")}</select>
+   <div class="acts left" style="padding-left:0;margin-top:10px"><button class="btn btn-primary" data-lpay="1" type="button">Record payment</button>${L.bal>0?`<button class="btn btn-secondary" data-lpayall="1" type="button">Pay full balance (${money(L.bal)})</button>`:""}</div>
+   <p class="hint" style="margin-bottom:0">A payment is taken off what the customer owes. If they pay more than they owe, the extra stays as credit for their next purchase.</p></section>
+  <div class="ledger">
+   <section class="card list lside"><h3>Products taken</h3>${taken||`<div class="empty">Nothing taken.</div>`}<div class="ltot"><span>Total taken</span><b>${money(L.taken)}</b></div></section>
+   <section class="card list lside"><h3>Money paid</h3>${paid||`<div class="empty">No payment yet.</div>`}<div class="ltot"><span>Total paid</span><b>${money(L.paid)}</b></div></section>
+  </div>
+  <div class="lbal ${st[2]}"><span>${st[0]} (taken ${money(L.taken)} less paid ${money(L.paid)})</span><b>${st[1]}</b></div>`;
 }
 /* change a worker's role and access (administrators only; the owner and yourself are not editable) */
 function editBox(w){
@@ -727,6 +769,7 @@ function rx(){
 function msg(){return state.msg?`<div class="msg ${state.msg.err?"err":""}" role="status">${esc(state.msg.t)}</div>`:"";}
 
 function render(){
+  LED=null;
   if(cloud)cloud.syncStore(); /* save any change to stock or sales */
   applyFacility();
   const lg=document.getElementById("login");
@@ -736,7 +779,7 @@ function render(){
   document.querySelectorAll(".nav button").forEach(b=>{b.hidden=!allowed(b.dataset.v);if(b.dataset.v===state.view)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current");});
   if(state.view==="home"&&!isMobile())state.view=Object.keys(VIEWS).find(allowed)||"dash";
   const back=isMobile()&&state.view!=="home"?`<button class="btn btn-secondary back" id="backhome" type="button">&larr; Home</button>`:"";
-  document.getElementById("main").innerHTML=(state.as?banner():"")+back+({home,dash,inv,pos,rcpt,rx,team,facility})[state.view]();
+  document.getElementById("main").innerHTML=(state.as?banner():"")+back+({home,dash,inv,pos,rcpt,ledger,rx,team,facility})[state.view]();
   const s=document.getElementById("search");
   if(s)s.oninput=e=>{state.q=e.target.value;document.getElementById("mrows").innerHTML=mrows();};
   const fnI=document.getElementById("fn");
@@ -753,11 +796,13 @@ function render(){
   if(cnI){const dd=document.getElementById("cdd"),note=document.getElementById("cnote");
     const show=()=>{const k=keyOf(cnI.value);if(note)note.textContent=custNote();
       const m=[...debtors().entries()].filter(([key])=>!k||key.includes(k)).sort((a,b)=>(b[0].startsWith(k)-a[0].startsWith(k))||(a[0]<b[0]?-1:1)).slice(0,8);
-      dd.innerHTML=m.map(([key,d])=>`<button type="button" data-cust="${esc(key)}"><span>${esc(d.name)}${d.phone?" · "+esc(d.phone):""}</span><span>owes ${money(d.owed)}</span></button>`).join("");
+      dd.innerHTML=m.map(([key,d])=>`<button type="button" data-cust="${esc(key)}"><span>${esc(d.name)}${d.phone?" · "+esc(d.phone):""}</span><span>${balText(d)}</span></button>`).join("");
       const open=m.length>0&&!(m.length===1&&m[0][0]===k);dd.hidden=!open;cnI.setAttribute("aria-expanded",open?"true":"false");};
     cnI.oninput=show;cnI.onfocus=show;cnI.onblur=()=>{dd.hidden=true;cnI.setAttribute("aria-expanded","false");};
     cnI.onkeydown=e=>{if(e.key==="Escape")dd.hidden=true;else if(e.key==="Enter"&&!dd.hidden){const b=dd.querySelector("button");if(b){e.preventDefault();b.click();}}};
     dd.onmousedown=e=>e.preventDefault();}
+  const ls=document.getElementById("lsearch");
+  if(ls)ls.oninput=e=>{state.ledQ=e.target.value;document.getElementById("lrows").innerHTML=ledRows();};
   const ps=document.getElementById("psearch");
   if(ps){const dd=document.getElementById("pdd");
     const show=()=>{state.pq=ps.value;const h=prows();dd.innerHTML=h;dd.hidden=!h;ps.setAttribute("aria-expanded",h?"true":"false");};
@@ -779,13 +824,14 @@ function render(){
 }
 function go(v){
   if(isMobile()&&v!=="home"&&state.view==="home")try{history.pushState({v},"",location.pathname+location.search+"#"+v);}catch(e){}
-  state.view=v;state.msg=null;state.rcpt=null;state.draft=null;state.teamTab="workers";state.facTab="details";state.rcptTab="all";state.bdelAsk=null;state.wedit=null;render();window.scrollTo(0,0);
+  state.view=v;state.msg=null;state.rcpt=null;state.draft=null;state.teamTab="workers";state.facTab="details";state.rcptTab="all";state.sel=null;state.ledCust=null;state.ledQ="";state.bdelAsk=null;state.wedit=null;render();window.scrollTo(0,0);
 }
 window.addEventListener("popstate",()=>{if(!state.user)return;state.msg=null;state.rcpt=null;state.draft=null;if(isMobile())state.view="home";render();});
 if(MQ.addEventListener)MQ.addEventListener("change",()=>render());
 document.querySelectorAll(".nav button").forEach(b=>b.onclick=()=>go(b.dataset.v));
 
 document.getElementById("main").addEventListener("input",e=>{const i=e.target.id,d=state.draft;
+  if((i==="selq"||i==="selp")&&state.sel){state.sel[i==="selq"?"qty":"price"]=e.target.value;const tt=document.getElementById("selt");if(tt)tt.textContent=selTotal();return;}
   if(d){if(i==="fname")d.name=e.target.value;else if(i==="fphone")d.phone=e.target.value;else if(i==="ffooter")d.footer=e.target.value;}
   if(i==="cn")state.cust.name=e.target.value;else if(i==="cph")state.cust.phone=e.target.value;else if(i==="cdue")state.cust.due=e.target.value;
   else if(i==="cd"){state.cust.dep=e.target.value;const cb=document.getElementById("cbal");if(cb)cb.textContent=credText();}
@@ -799,7 +845,10 @@ document.getElementById("main").addEventListener("input",e=>{const i=e.target.id
 });
 document.addEventListener("click",e=>{if(state.calOpen&&!e.target.closest(".daterow")){state.calOpen=false;if(state.view==="pos")render();}});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&state.calOpen){state.calOpen=false;if(state.view==="pos")render();}});
-document.getElementById("main").addEventListener("keydown",e=>{if(e.target.dataset&&e.target.dataset.cqty&&["e","E","+","-",".",","].includes(e.key))e.preventDefault();});
+document.getElementById("main").addEventListener("keydown",e=>{
+  if(e.target.dataset&&(e.target.dataset.cqty||e.target.id==="selq")&&["e","E","+","-",".",","].includes(e.key))e.preventDefault();
+  if((e.target.id==="selq"||e.target.id==="selp")&&e.key==="Enter"){e.preventDefault();const a=document.getElementById("seladd");if(a)a.click();}
+});
 document.getElementById("main").addEventListener("click",e=>{
   const t=e.target.closest("button");if(!t)return;
   if(t.id==="backhome"){if(history.state&&history.state.v)history.back();else go("home");
@@ -807,24 +856,18 @@ document.getElementById("main").addEventListener("click",e=>{
     const d=debtors().get(t.dataset.cust);if(!d)return;
     state.cust.name=d.name;if(!state.cust.phone.trim())state.cust.phone=d.phone;render();
     const dep=document.getElementById("cd");if(dep)dep.focus();
-  }else if(t.dataset.godebts){go("rcpt");state.rcptTab="debts";render();
-  }else if(t.dataset.go){go(t.dataset.go);  }else if(t.dataset.cpay||t.dataset.cfull){
-    const box=t.closest(".cpbox"),key=box.dataset.ckey,d=debtors().get(key);if(!d)return;
-    const meth=box.querySelector("select").value;let amt=d.owed;
-    if(t.dataset.cpay){const raw=box.querySelector("input").value;amt=+raw;
-      if(raw===""||isNaN(amt)||amt<=0){state.msg={t:"Enter the amount "+d.name+" paid.",err:1};return render();}
-      if(amt>d.owed){state.msg={t:d.name+" only owes "+money(d.owed)+" in total. Enter that amount or less.",err:1};return render();}}
-    const n=payCustomer(key,amt,meth),left=debtors().get(key);
-    state.msg={t:left?"Payment of "+money(amt)+" recorded. "+n+" debt"+(n===1?"":"s")+" cleared. "+d.name+" still owes "+money(left.owed)+".":d.name+" has paid everything ("+money(amt)+"). All "+n+" debts are cleared and removed from this list."};render();window.scrollTo(0,0);
-  }else if(t.dataset.dpay||t.dataset.dfull){
-    const id=+(t.dataset.dpay||t.dataset.dfull),x=state.sales.find(z=>z.id===id);if(!x||!x.debt)return;
-    const o=saleOwed(x),meth=(document.getElementById("dpm"+id)||{}).value||"Cash";
-    let amt=o;
-    if(t.dataset.dpay){const raw=(document.getElementById("dpa"+id)||{}).value||"";amt=+raw;
-      if(raw===""||isNaN(amt)||amt<=0){state.msg={t:"Enter the amount the customer paid.",err:1};return render();}
-      if(amt>o){state.msg={t:x.debt.customer+" only owes "+money(o)+". Enter that amount or less.",err:1};return render();}}
-    x.debt.pays.push({amt,method:meth,time:new Date().toLocaleString("en-GB"),ts:Date.now(),by:(state.team.find(w=>w.id===state.user)||{}).name||""});
-    state.msg={t:saleOwed(x)<=0?x.debt.customer+" has paid in full. The debt is cleared and removed from this list.":"Payment of "+money(amt)+" recorded. "+x.debt.customer+" still owes "+money(saleOwed(x))+"."};render();window.scrollTo(0,0);
+  }else if(t.dataset.go){go(t.dataset.go);  }else if(t.dataset.led){state.ledCust=t.dataset.led;state.msg=null;render();window.scrollTo(0,0);
+  }else if(t.id==="ledback"){state.ledCust=null;state.msg=null;render();window.scrollTo(0,0);
+  }else if(t.dataset.lpay||t.dataset.lpayall){
+    const L=ledgers().byKey.get(state.ledCust);if(!L)return;
+    let amt=L.bal;
+    if(t.dataset.lpay){const raw=(document.getElementById("lpa")||{}).value||"";amt=+raw;
+      if(raw===""||isNaN(amt)||amt<=0){state.msg={t:"Enter the amount "+L.name+" paid.",err:1};return render();}}
+    else if(amt<=0)return;
+    ledPay(L,amt,(document.getElementById("lpm")||{}).value||"Cash");
+    const N=ledgers().byKey.get(state.ledCust);
+    state.msg={t:"Payment of "+money(amt)+" recorded. "+(N.bal>0?N.name+" still owes "+money(N.bal)+".":N.bal<0?N.name+" has paid "+money(-N.bal)+" more than owed. It stays on the ledger as credit.":N.name+" has paid everything. Balance is zero.")};
+    render();window.scrollTo(0,0);
   }else if(t.dataset.rt){state.rcptTab=t.dataset.rt;state.msg=null;render();
   }else if(t.dataset.ft){state.facTab=t.dataset.ft;state.msg=null;render();
   }else if(t.id==="exadd"){
@@ -861,13 +904,26 @@ document.getElementById("main").addEventListener("click",e=>{
     else{state.meds.push({id:state.nextMed++,name,qty,min:cat.min,cost:fc.value!==""?+fc.value:(prev?prev.cost:0),sell:sellIn,exp});
       state.msg={t:(prev?"New batch created for ":"Added ")+qty+" \u00d7 "+name+", expires "+exp+"."};}
     render();
-  }else if(t.dataset.cadd){
-    state.pq="";
-    const n=t.dataset.cadd,tot=sellable(n),l=state.cart.filter(x=>keyOf(x.name)===keyOf(n)).reduce((a,x)=>a+x.qty,0);
-    if(!tot||l>=tot)state.msg={t:"Only "+tot+" of "+n+" in stock.",err:1};
-    else{state.msg=null;const ex=state.cart.find(x=>keyOf(x.name)===keyOf(n));if(ex)ex.qty++;else state.cart.push({uid:state.nextLine++,name:n,qty:1,price:batches(n)[0].sell});}
+  }else if(t.dataset.csel){
+    const n=t.dataset.csel;state.pq="";state.msg=null;
+    if(!sellable(n))state.msg={t:"No "+n+" in stock.",err:1};
+    else state.sel={name:n,qty:"1",price:String(batches(n)[0].sell)};
     render();
-    if(!isMobile()){const q=document.getElementById("psearch");if(q)q.focus();}
+    const q=document.getElementById("selq");if(q){if(!isMobile()){q.focus();q.select();}else q.scrollIntoView({block:"center"});}
+  }else if(t.id==="selx"){state.sel=null;render();const q=document.getElementById("psearch");if(q&&!isMobile())q.focus();
+  }else if(t.id==="selminus"||t.id==="selplus"){
+    const sl=state.sel;if(!sl)return;let q=Math.floor(+sl.qty);if(isNaN(q))q=1;
+    q=t.id==="selplus"?Math.min(q+1,Math.max(1,sellable(sl.name)-inCartOf(sl.name))):Math.max(1,q-1);
+    sl.qty=String(q);const qi=document.getElementById("selq");if(qi)qi.value=sl.qty;const tt=document.getElementById("selt");if(tt)tt.textContent=selTotal();
+  }else if(t.id==="seladd"){
+    const sl=state.sel;if(!sl)return;
+    const n=sl.name,tot=sellable(n),av=tot-inCartOf(n),q=Math.floor(+sl.qty),p=+sl.price;
+    if(sl.qty===""||isNaN(q)||q<1){state.msg={t:"Enter how many to add.",err:1};return render();}
+    if(sl.price===""||isNaN(p)||p<0){state.msg={t:"Enter the price each.",err:1};return render();}
+    if(q>av){state.msg={t:av>0?"Only "+av+" of "+n+" available to add.":"All "+tot+" of "+n+" are already in the cart.",err:1};return render();}
+    state.msg=null;state.cart.push({uid:state.nextLine++,name:n,qty:q,price:p}); /* each add is its own cart line, never merged with one already in the cart */
+    state.sel=null;render();
+    if(!isMobile()){const e2=document.getElementById("psearch");if(e2)e2.focus();}
   }else if(t.dataset.cinc||t.dataset.cdec){
     const uid=+(t.dataset.cinc||t.dataset.cdec),l=state.cart.find(x=>x.uid===uid),tot=sellable(l.name),inCart=state.cart.filter(x=>keyOf(x.name)===keyOf(l.name)).reduce((a,x)=>a+x.qty,0);
     if(t.dataset.cinc){if(inCart<tot){l.qty++;state.msg=null;}else state.msg={t:"Only "+tot+" of "+l.name+" in stock.",err:1};}
@@ -901,7 +957,8 @@ document.getElementById("main").addEventListener("click",e=>{
     state.sales.unshift(sale);state.saleDate=null;state.calOpen=false;state.calM=null;
     const dn=debt?debt.customer:"";
     state.cart=[];state.received="";if(debt)state.cust={name:"",phone:"",dep:"",depm:"Cash",due:""};
-    state.msg={t:debt?"Credit sale recorded: "+dn+" owes "+money(total-salePaid(state.sales[0]))+". See Receipts, then Debts.":"Sale complete: "+money(total)+" paid by "+method+"."+(change!=null?" Change to give: "+money(change)+".":"")};render();
+    LED=null;const nl=debt?ledgers().byKey.get(keyOf(dn)):null;
+    state.msg={t:debt?"Credit sale recorded: "+dn+" "+balText(nl)+" in total. See the Ledger tab.":"Sale complete: "+money(total)+" paid by "+method+"."+(change!=null?" Change to give: "+money(change)+".":"")};render();
   }else if(t.dataset.rview){state.rcpt=+t.dataset.rview;state.rdelAsk=false;state.rdelErr="";render();window.scrollTo(0,0);
   }else if(t.id==="rback"){state.rcpt=null;state.rdelAsk=false;state.rdelErr="";render();
   }else if(t.dataset.rdelask){if(!isAdmin())return;state.rdelAsk=true;state.rdelErr="";render();const pe=document.getElementById("rdelpin");if(pe)pe.focus();
@@ -1155,7 +1212,7 @@ document.addEventListener("focusout",()=>{if(storeDirty)setTimeout(()=>{if(store
 async function onSignedIn(w,first){
   if(cloud){try{await cloud.openStore(storeAdapter);}catch(e){try{await cloud.logout();}catch(_){}throw e;}}
   state.saleDate=null;state.calOpen=false;state.calM=null;
-  state.fails=0;state.user=w.id;state.as=null;state.msg=null;state.rcpt=null;state.draft=null;state.cart=[];
+  state.fails=0;state.user=w.id;state.as=null;state.msg=null;state.rcpt=null;state.draft=null;state.cart=[];state.sel=null;
   state.team=[w];
   if(unsubTeam){unsubTeam();unsubTeam=null;}
   if(w.role==="Admin")unsubTeam=cloud.watchTeam(list=>{if(!state.user)return;state.team=list;syncRoster(list);if(state.view==="team"&&!state.rdelAsk&&!state.delAsk)render();},()=>{});

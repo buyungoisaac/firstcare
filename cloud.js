@@ -13,7 +13,7 @@ const cloud=(function(){
   const app=firebase.initializeApp(FB_CONFIG),auth=app.auth(),db=app.firestore();
   /* nobody stays signed in after the page closes (shared pharmacy devices) */
   const noPersist=auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(()=>{});
-  const ALL=["dash","inv","pos","rcpt","rx","team","facility"];
+  const ALL=["dash","inv","pos","rcpt","ledger","rx","team","facility"];
   /* Firebase Auth needs 6+ characters, so a fixed suffix is added to the 4-digit PIN */
   const pw=pin=>pin+"-fc";
   const emailOf=name=>{

@@ -321,3 +321,39 @@ button.cd:hover{background:var(--row-hover)}
 .cd:focus-visible,.calnav:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
 .calf{display:flex;justify-content:center;border-top:1px solid var(--border);margin-top:8px;padding-top:4px}
 @media print{.daterow{display:none!important}}
+
+/* Ledger */
+.ledger{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start;margin:16px 0}
+.lside h3{margin:0;padding:12px 16px;font-size:15px;border-bottom:1px solid var(--border-strong)}
+.lent{padding:10px 16px;border-bottom:1px solid var(--border)}
+.lent .lh{display:flex;justify-content:space-between;gap:8px}
+.lent small{display:block;color:var(--text-secondary)}
+.ltot{display:flex;justify-content:space-between;gap:8px;padding:12px 16px;font-weight:700;background:var(--row-hover)}
+.lbal{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;margin:12px 0;border-radius:var(--radius-md);font-weight:700}
+.lbal b{font-size:20px;white-space:nowrap}
+@media (max-width:560px){.ledger{grid-template-columns:1fr}}
+
+/* POS: the picked product, with price and quantity, before it goes into the cart */
+.selbox{padding:10px 12px;margin-bottom:16px}
+.selbox .sr{display:flex;align-items:flex-end;gap:10px}
+.selbox .prod{flex:1;min-width:0;border:1px solid var(--border-strong);border-radius:var(--radius-md);padding:6px 10px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.selbox .pn{min-width:0}.selbox .pn b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.selbox .pn small{font-size:11px;color:var(--text-secondary)}
+.selbox .x{all:unset;cursor:pointer;color:var(--text-secondary);font-size:18px;line-height:1;padding:2px 6px}
+.selbox .f label{display:block;font-size:11px;font-weight:600;color:var(--text-secondary);margin:0 0 2px}
+.selbox .f input{margin:0;padding:7px 8px;font-size:13px;border-radius:var(--radius-md)}
+.selbox .f small{display:block;font-size:11px;color:var(--text-secondary);margin-top:2px}
+.selbox .f.p input{width:90px}
+.selbox .f.q .st{display:flex;align-items:center;gap:4px}.selbox .f.q input{width:56px;text-align:center}
+.selbox .f.q .st button{all:unset;box-sizing:border-box;cursor:pointer;width:28px;height:32px;text-align:center;line-height:30px;font-size:16px;border:1px solid var(--border-strong);border-radius:var(--radius-md);color:var(--text-primary)}
+.selbox .f.t{min-width:64px;text-align:right}.selbox .f.t b{display:block;font-size:14px;padding:7px 0}
+.selbox .add{all:unset;box-sizing:border-box;cursor:pointer;height:32px;padding:0 14px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:var(--radius-md);border:1px solid var(--button-primary-bg);color:var(--button-primary-bg);font-weight:700;font-size:13px;white-space:nowrap}
+.selbox .add:hover,.selbox .add:focus-visible{background:var(--button-primary-bg);color:var(--button-primary-text)}
+@media (max-width:720px){
+ .selbox .sr{flex-direction:column;align-items:stretch;gap:8px}
+ .selbox .prod{padding:10px 12px}.selbox .pn b{font-size:15px}
+ .selbox .f label{font-size:13px}.selbox .f input{width:100%!important;padding:12px;font-size:16px;text-align:left}
+ .selbox .f.q input{text-align:left}
+ .selbox .f.q .st{display:block}.selbox .f.q .st button{display:none}
+ .selbox .f.t{text-align:left}.selbox .f.t b{padding:2px 0;font-size:16px}
+ .selbox .add{height:46px;font-size:15px}
+}
